@@ -3,37 +3,25 @@ import logging
 import os
 import traceback
 
-from textual.app import App, ComposeResult
+from typing import Iterable
+
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import ScrollableContainer, Vertical
 from textual.message import Message
-from textual.widgets import Footer, Header, Markdown, OptionList, TextArea
-from textual.widgets.option_list import Option
+from textual.screen import Screen
+from textual.events import TextSelected
+from textual.widgets import Footer, Header, Markdown, TextArea
 
 from agent.agent import AgentInput, CodingAgent
 
+_log_file = os.getenv("AGENT_LOG_FILE")
 logging.basicConfig(
     level=os.getenv("AGENT_LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[logging.FileHandler(_log_file) if _log_file else logging.NullHandler()],
 )
 logger = logging.getLogger(__name__)
-
-COMMANDS = [
-    ("/help", "❓ Show help"),
-    ("/login", "🔑 GitHub Copilot login"),
-    ("/logout", "🚪 Clear tokens"),
-    ("/status", "📊 Show login status"),
-    ("/clear", "🧹 Clear chat"),
-    ("/quit", "👋 Quit"),
-]
-
-COMMANDS_HELP = """Available commands:
-  /help   - Show this help message
-  /login  - Start GitHub Copilot OAuth device flow
-  /logout - Clear authentication tokens
-  /status - Show login status
-  /clear  - Clear chat history
-  /quit   - Quit the application"""
 
 
 class MessageOutput(Markdown):
@@ -46,11 +34,6 @@ class MessageOutput(Markdown):
         height: auto;
         margin: 0 0 1 0;
         padding: 0 1;
-        border-left: blank;
-    }
-
-    MessageOutput:focus {
-        border-left: solid $accent;
     }
     """
 
@@ -91,57 +74,6 @@ class MessageOutput(Markdown):
         self.focus()
 
 
-class CommandSuggestions(OptionList):
-    """Dropdown for command suggestions."""
-
-    DEFAULT_CSS = """
-    CommandSuggestions {
-        height: auto;
-        max-height: 8;
-        display: none;
-        layer: overlay;
-        dock: bottom;
-        margin-bottom: 3;
-        margin-left: 1;
-        margin-right: 1;
-        background: $surface;
-        border: solid $primary;
-    }
-
-    CommandSuggestions.visible {
-        display: block;
-    }
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._refresh_options("")
-
-    def _refresh_options(self, filter_text: str) -> None:
-        """Update options based on filter text."""
-        self.clear_options()
-        filter_lower = filter_text.lower()
-        for cmd, desc in COMMANDS:
-            if cmd.startswith(filter_lower):
-                self.add_option(Option(f"{desc}  {cmd}", id=cmd))
-
-    def filter(self, text: str) -> None:
-        """Filter commands and show/hide dropdown."""
-        if text.startswith("/"):
-            self._refresh_options(text)
-            if self.option_count > 0:
-                self.add_class("visible")
-                self.highlighted = 0
-            else:
-                self.remove_class("visible")
-        else:
-            self.remove_class("visible")
-
-    def hide(self) -> None:
-        """Hide the dropdown."""
-        self.remove_class("visible")
-
-
 class UserInput(TextArea):
     """A TextArea for user input with command suggestions."""
 
@@ -150,6 +82,11 @@ class UserInput(TextArea):
         height: auto;
         max-height: 10;
         margin: 0 1;
+        border: none;
+    }
+
+    UserInput:focus {
+        border: none;
     }
     """
 
@@ -161,71 +98,21 @@ class UserInput(TextArea):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.language = None
-        self._suggestions: CommandSuggestions | None = None
-
-    def on_mount(self) -> None:
-        """Get reference to suggestions widget."""
-        try:
-            self._suggestions = self.app.query_one(CommandSuggestions)
-        except Exception:
-            pass
-
-    def on_text_area_changed(self, event: TextArea.Changed) -> None:
-        """Update suggestions when text changes."""
-        if self._suggestions:
-            self._suggestions.filter(self.text)
 
     async def on_key(self, event) -> None:
         """Handle key events."""
-        if self._suggestions and self._suggestions.has_class("visible"):
-            if event.key == "down":
-                event.prevent_default()
-                self._suggestions.action_cursor_down()
-                return
-            elif event.key == "up":
-                event.prevent_default()
-                self._suggestions.action_cursor_up()
-                return
-            elif event.key == "tab":
-                event.prevent_default()
-                self._accept_suggestion()
-                return
-            elif event.key == "escape":
-                event.prevent_default()
-                self._suggestions.hide()
-                return
-
         if event.key == "shift+enter":
             event.prevent_default()
             self.insert("\n")
         elif event.key == "enter":
             event.prevent_default()
-            if self._suggestions:
-                self._suggestions.hide()
             self.post_message(self.Submit(self.text))
-
-    def _accept_suggestion(self) -> None:
-        """Accept the currently highlighted suggestion."""
-        if not self._suggestions or self._suggestions.option_count == 0:
-            return
-        highlighted = self._suggestions.highlighted
-        if highlighted is not None:
-            option = self._suggestions.get_option_at_index(highlighted)
-            if option and option.id:
-                self.text = str(option.id)
-                self.move_cursor(self.document.end)
-                self._suggestions.hide()
 
 
 class CodingAgentApp(App):
     """A minimalist TUI for the Coding Agent."""
 
     TITLE = "Agent 007"
-    CSS = """
-    #main {
-        layers: base overlay;
-    }
-    """
     BINDINGS = [
         Binding("ctrl+c", "handle_sigint", "Quit", show=False),
         Binding("c", "copy_focused", "Copy", show=True),
@@ -248,6 +135,18 @@ class CodingAgentApp(App):
             self._last_sigint_time = now
             self.notify("Press Ctrl+C again to quit", severity="warning")
 
+    def on_text_selected(self, event: TextSelected) -> None:
+        """Auto-copy selected text to clipboard on mouse release."""
+        selected = self.screen.get_selected_text()
+        if selected:
+            try:
+                import pyperclip
+
+                pyperclip.copy(selected)
+            except Exception:
+                self.copy_to_clipboard(selected)
+            self.notify(f"Copied {len(selected)} characters")
+
     def action_copy_focused(self) -> None:
         """Copy the focused message to clipboard."""
         focused = self.focused
@@ -261,11 +160,40 @@ class CodingAgentApp(App):
             task.cancel()
         self._background_tasks.clear()
 
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        yield from super().get_system_commands(screen)
+        yield SystemCommand("Login", "GitHub Copilot login", self._cmd_login)
+        yield SystemCommand("Logout", "Clear authentication tokens", self._cmd_logout)
+        yield SystemCommand("Status", "Show login status", self._cmd_status)
+        yield SystemCommand("Clear", "Clear chat history", self._cmd_clear)
+
+    def _cmd_login(self) -> None:
+        result = self.agent.handle_command("/login")
+        if result:
+            asyncio.ensure_future(self._add_message(result))
+        task = asyncio.create_task(self._poll_oauth())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    def _cmd_logout(self) -> None:
+        result = self.agent.handle_command("/logout")
+        if result:
+            asyncio.ensure_future(self._add_message(result))
+
+    def _cmd_status(self) -> None:
+        result = self.agent.handle_command("/status")
+        if result:
+            asyncio.ensure_future(self._add_message(result))
+
+    async def _cmd_clear(self) -> None:
+        self.agent.clear_history()
+        await self.chat_container.remove_children()
+        await self._add_message("[Agent] Chat history cleared.")
+
     def compose(self) -> ComposeResult:
         yield Header(id="header")
         with Vertical(id="main"):
             yield ScrollableContainer(id="chat-container")
-            yield CommandSuggestions(id="suggestions")
             yield UserInput(id="user_input")
         yield Footer(id="footer")
 
@@ -289,48 +217,7 @@ class CodingAgentApp(App):
             return
 
         self.input_widget.text = ""
-
-        if user_text.startswith("/"):
-            await self._handle_command(user_text)
-            return
-
         await self._handle_chat(user_text)
-
-    async def _handle_command(self, cmd: str) -> None:
-        """Handle slash commands."""
-        cmd_name = cmd.split()[0]
-
-        if cmd_name == "/quit":
-            self._cancel_background_tasks()
-            self.exit()
-            return
-
-        if cmd_name == "/help":
-            await self._add_message(COMMANDS_HELP)
-            return
-
-        if cmd_name == "/clear":
-            self.agent.clear_history()
-            await self.chat_container.remove_children()
-            await self._add_message("[Agent] Chat history cleared.")
-            return
-
-        if cmd_name == "/login":
-            result = self.agent.handle_command(cmd_name)
-            if result:
-                await self._add_message(result)
-            task = asyncio.create_task(self._poll_oauth())
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
-            return
-
-        if cmd_name in ("/logout", "/status"):
-            result = self.agent.handle_command(cmd_name)
-            if result:
-                await self._add_message(result)
-            return
-
-        await self._add_message(f"[Agent] Unknown command: {cmd_name}\n\n{COMMANDS_HELP}")
 
     async def _poll_oauth(self) -> None:
         """Poll for OAuth completion in background."""
