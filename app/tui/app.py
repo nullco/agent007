@@ -17,6 +17,7 @@ from textual.widgets import Footer, Header
 from app.config import AppConfig
 from app.tui.commands import CommandHandler
 from app.tui.widgets import MessageOutput, UserInput
+from app.tui.provider_selection import ProviderSelectionScreen
 
 logger = logging.getLogger(__name__)
 
@@ -80,19 +81,33 @@ class CodingAgentApp(App):
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         """Provide system commands (accessible via command palette)."""
         yield from super().get_system_commands(screen)
-        yield SystemCommand("Login", "GitHub Copilot login", self._cmd_login)
+        yield SystemCommand("Login", "Select provider and authenticate", self._cmd_login)
         yield SystemCommand("Logout", "Clear authentication tokens", self._cmd_logout)
         yield SystemCommand("Status", "Show login status", self._cmd_status)
         yield SystemCommand("Clear", "Clear chat history", self._cmd_clear)
         yield SystemCommand("Model", "List or select model", self._cmd_model)
 
     def _cmd_login(self) -> None:
-        """Execute login command."""
-        result = asyncio.ensure_future(self.command_handler.handle_login())
-        asyncio.ensure_future(self._handle_command_result(result))
+        """Show provider selection screen for login."""
+        def on_provider_selected(provider: str | None):
+            """Handle provider selection."""
+            if provider:
+                asyncio.ensure_future(self._login_with_provider(provider))
+        
+        self.push_screen(ProviderSelectionScreen(self.app_config), on_provider_selected)
+
+    async def _login_with_provider(self, provider: str) -> None:
+        """Login with a selected provider.
+        
+        Args:
+            provider: Name of the provider to login with.
+        """
+        result = await self.command_handler.handle_login(provider)
+        if result:
+            await self._add_message(result)
         
         # Start OAuth polling in background
-        task = asyncio.create_task(self._poll_oauth())
+        task = asyncio.create_task(self._poll_oauth(provider))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
@@ -189,10 +204,18 @@ class CodingAgentApp(App):
         if result:
             await self._add_message(result)
 
-    async def _poll_oauth(self) -> None:
-        """Poll for OAuth completion in background."""
+    async def _poll_oauth(self, provider_name: str | None = None) -> None:
+        """Poll for OAuth completion in background.
+        
+        Args:
+            provider_name: Name of the provider to poll for. If None, uses current provider.
+        """
         loop = asyncio.get_running_loop()
-        authenticator = self.app_config.get_authenticator()
+        
+        if provider_name is None:
+            provider_name = self.app_config.ai_manager.provider_name()
+        
+        authenticator = self.app_config.get_authenticator(provider_name)
         
         if not authenticator or not hasattr(authenticator, "poll_for_token"):
             return

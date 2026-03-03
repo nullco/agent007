@@ -5,20 +5,47 @@ Your TUI supports the following slash commands:
 ## Authentication Commands
 
 ### `/login`
-Start GitHub Copilot authentication (device flow).
-- Displays a user code and verification URL
-- Opens a device flow for you to authorize
+Start authentication with a specified or default provider.
+
+**Usage:**
+- `/login` - Log in with the current provider (default: GitHub Copilot)
+- `/login copilot` - Log in with GitHub Copilot (device flow)
+- `/login openai` - Log in with OpenAI
+- `/login <provider>` - Log in with any configured provider
+
+**Features:**
+- Device flow for GitHub Copilot
 - Automatically polls for completion
+- Supports multiple providers
+- Each provider maintains its own token state
 
 ### `/logout`
-Clear all authentication tokens.
-- Removes stored GitHub and Copilot tokens
+Clear authentication tokens for a provider.
+
+**Usage:**
+- `/logout` - Log out from the current provider
+- `/logout copilot` - Log out from GitHub Copilot
+- `/logout openai` - Log out from OpenAI
+- `/logout <provider>` - Log out from any configured provider
+
+**Features:**
+- Removes stored tokens
 - Updates environment variables
+- Per-provider logout support
 
 ### `/status`
-Show current login status.
-- Displays username if logged in
-- Shows "Not logged in" otherwise
+Show login status for provider(s).
+
+**Usage:**
+- `/status` - Show status for the current provider
+- `/status copilot` - Show status for GitHub Copilot
+- `/status openai` - Show status for OpenAI
+- `/status all` - Show status for all providers
+
+**Example Output:**
+```
+[Status] Not logged in
+```
 
 ## Chat & History
 
@@ -58,6 +85,24 @@ Available:
 - Shows model status (enabled, requires acceptance, etc.)
 - Automatically handles provider switching when you select a model
 - Models are inherently tied to their providers
+
+## Multi-Provider Support
+
+The TUI now supports multiple authentication providers:
+
+- **GitHub Copilot** (default) - Uses device flow OAuth
+- **OpenAI** - API key based authentication
+
+Each provider maintains its own:
+- Authentication tokens
+- Token expiration state
+- Login status
+- Available models
+
+You can seamlessly switch between providers using:
+1. `/login <provider>` - Log in to a new provider
+2. `/model <model_id>` - Switch to provider by selecting its model
+3. Models automatically indicate which provider they belong to
 
 ## Interactive Usage
 

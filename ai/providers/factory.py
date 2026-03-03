@@ -11,6 +11,9 @@ from typing import Optional
 
 from .base import Provider
 
+# List of available providers
+AVAILABLE_PROVIDERS = ["copilot", "openai"]
+
 
 def _get_provider_class(name: str):
     name = (name or "").lower()

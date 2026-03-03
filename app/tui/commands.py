@@ -18,46 +18,104 @@ class CommandHandler:
         """Initialize the command handler.
         
         Args:
-            app_config: Application configuration with agent and authenticator.
+            app_config: Application configuration with agent and authenticators.
         """
         self.app_config = app_config
         self.agent = app_config.agent
-        self.authenticator = app_config.get_authenticator()
 
-    async def handle_login(self) -> str | None:
-        """Handle /login command."""
-        if not self.authenticator:
-            return "[Commands] No authenticator available for this provider"
+    async def handle_login(self, provider_name: str = "") -> str | None:
+        """Handle /login command.
+        
+        Usage:
+            /login              - Show list of available providers
+            /login copilot      - Log in with GitHub Copilot
+            /login openai       - Log in with OpenAI
+        """
+        provider_name = provider_name.strip().lower()
+        
+        # If no provider specified, show available providers
+        if not provider_name:
+            available = self.app_config.auth_manager.get_available_providers()
+            if not available:
+                return "[Login] No providers available."
+            
+            # Always show list when no provider is specified
+            message = "[Login] Available providers:\n"
+            for provider in available:
+                status = "✓" if self.app_config.auth_manager.is_logged_in(provider) else "○"
+                message += f"  {status} {provider}\n"
+            message += "\nUse: /login <provider_name>"
+            return message
+        
+        # Get authenticator for the specified provider
+        authenticator = self.app_config.get_authenticator(provider_name)
+        if not authenticator:
+            available = self.app_config.auth_manager.get_available_providers()
+            if available:
+                available_str = ", ".join(available)
+                return f"[Login] Provider '{provider_name}' not found.\n\nAvailable providers: {available_str}\n\nUsage: /login <provider>"
+            return f"[Login] Provider '{provider_name}' not found and no providers available."
         
         try:
-            ok, msg = self.authenticator.start_login()
+            ok, msg = authenticator.start_login()
             return msg
         except Exception as e:
             logger.error("Login failed: %s", e)
-            return f"[Commands] Login failed: {e}"
+            return f"[Login] Failed: {e}"
 
-    async def handle_logout(self) -> str | None:
-        """Handle /logout command."""
-        if not self.authenticator:
-            return "[Commands] No authenticator available for this provider"
+    async def handle_logout(self, provider_name: str = "") -> str | None:
+        """Handle /logout command.
+        
+        Usage:
+            /logout              - Log out from the current provider
+            /logout copilot      - Log out from GitHub Copilot
+            /logout openai       - Log out from OpenAI
+        """
+        provider_name = provider_name.strip().lower()
+        
+        # If no provider specified, use current provider
+        if not provider_name:
+            provider_name = self.app_config.ai_manager.provider_name()
+        
+        authenticator = self.app_config.get_authenticator(provider_name)
+        if not authenticator:
+            return f"[Logout] Provider '{provider_name}' not found or has no authenticator."
         
         try:
-            return self.authenticator.logout()
+            return authenticator.logout()
         except Exception as e:
             logger.error("Logout failed: %s", e)
-            return f"[Commands] Logout failed: {e}"
+            return f"[Logout] Failed: {e}"
 
-    async def handle_status(self) -> str | None:
-        """Handle /status command."""
-        if not self.authenticator:
-            return "[Commands] No authenticator available for this provider"
+    async def handle_status(self, provider_name: str = "") -> str | None:
+        """Handle /status command.
+        
+        Usage:
+            /status              - Show status for the current provider
+            /status copilot      - Show status for GitHub Copilot
+            /status openai       - Show status for OpenAI
+            /status all          - Show status for all providers
+        """
+        provider_name = provider_name.strip().lower()
+        
+        # If "all" specified, show status for all providers
+        if provider_name == "all":
+            return self.app_config.auth_manager.get_login_status()
+        
+        # If no provider specified, use current provider
+        if not provider_name:
+            provider_name = self.app_config.ai_manager.provider_name()
+        
+        authenticator = self.app_config.get_authenticator(provider_name)
+        if not authenticator:
+            return f"[Status] Provider '{provider_name}' not found or has no authenticator."
         
         try:
-            status = self.authenticator.get_status()
-            return f"[Agent] {status}"
+            status = authenticator.get_status()
+            return f"[{provider_name}] {status}"
         except Exception as e:
             logger.error("Status check failed: %s", e)
-            return f"[Commands] Status check failed: {e}"
+            return f"[Status] Failed: {e}"
 
     async def handle_clear(self) -> str | None:
         """Handle /clear command."""
@@ -132,7 +190,6 @@ class CommandHandler:
             
             # Rebuild agent with new provider and model
             self.app_config.rebuild_agent()
-            self.authenticator = self.app_config.get_authenticator()
             
             return f"[Model] Switched to: {model_id} (provider: {provider})"
         except Exception as e:
@@ -156,11 +213,11 @@ class CommandHandler:
         args = parts[1] if len(parts) > 1 else ""
         
         if command == "/login":
-            return await self.handle_login()
+            return await self.handle_login(args)
         elif command == "/logout":
-            return await self.handle_logout()
+            return await self.handle_logout(args)
         elif command == "/status":
-            return await self.handle_status()
+            return await self.handle_status(args)
         elif command == "/clear":
             return await self.handle_clear()
         elif command == "/model":
