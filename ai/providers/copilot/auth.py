@@ -31,6 +31,13 @@ class CopilotAuthenticator:
         repr=False,
     )
 
+    def __post_init__(self) -> None:
+        """Hydrate tokens from the environment if available."""
+        if not self.github_token:
+            self.github_token = os.getenv("GITHUB_API_KEY")
+        if not self.copilot_token:
+            self.copilot_token = os.getenv("COPILOT_API_KEY")
+
     def cancel(self) -> None:
         """Signal cancellation to any running poll."""
         self._cancel_event.set()
@@ -100,8 +107,10 @@ class CopilotAuthenticator:
         return int(time.time() * 1000) >= self.copilot_expires_ms
 
     def refresh_token(self) -> bool:
-        """Refresh the Copilot token if expired. Returns True if refreshed."""
-        if not self.is_token_expired() or not self.github_token:
+        """Refresh the Copilot token if expired or missing. Returns True if refreshed."""
+        if not self.github_token:
+            return False
+        if self.copilot_token and not self.is_token_expired():
             return False
         self._apply_copilot_token(self.github_token)
         return self.copilot_token is not None
