@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import traceback
-from typing import Iterable
+from typing import Any, Callable, Iterable, TypeVar
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
@@ -23,6 +24,41 @@ from app.tui.widgets import MessageOutput, UserInput
 from app.tui.provider_selection import ProviderSelectionScreen
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+async def _run_in_daemon_thread(fn: Callable[[], _T]) -> _T:
+    """Run *fn* in a plain daemon thread and await its result.
+
+    Unlike ``loop.run_in_executor()``, threads started here are **not**
+    registered in ``concurrent.futures.thread._threads_queues``.
+    That global registry is drained by ``_python_exit()`` (a
+    ``threading._register_atexit`` hook) which calls ``t.join()`` on every
+    executor thread regardless of its daemon flag — causing the process to
+    hang until the thread finishes.  A plain ``threading.Thread(daemon=True)``
+    bypasses that registry entirely, so Python can exit immediately even if the
+    OAuth poll is still sleeping.
+
+    The caller is still responsible for signalling the thread to stop (via
+    ``cancel_event``) for a *clean* shutdown; the daemon flag is the safety net
+    that guarantees exit even when that signal is missed.
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[_T] = loop.create_future()
+
+    def _body() -> None:
+        try:
+            result = fn()
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(future.set_result, result)
+        except Exception as exc:  # noqa: BLE001
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(future.set_exception, exc)
+
+    thread = threading.Thread(target=_body, daemon=True, name="oauth-poll")
+    thread.start()
+    return await future
 
 
 class CodingAgentApp(App):
@@ -219,9 +255,7 @@ class CodingAgentApp(App):
         
         Args:
             provider_name: Name of the provider to poll for. If None, uses current provider.
-        """
-        loop = asyncio.get_running_loop()
-        
+        """        
         if provider_name is None:
             provider_name = self.app_config.ai_manager.provider_name()
         
@@ -231,9 +265,7 @@ class CodingAgentApp(App):
             return
             
         try:
-            success, msg = await loop.run_in_executor(
-                None, authenticator.poll_for_token
-            )
+            success, msg = await _run_in_daemon_thread(authenticator.poll_for_token)
             await self._add_message(msg)
             
             # If OAuth was successful, refresh the agent with the new token
