@@ -23,7 +23,6 @@ from app.config import AppConfig
 from app.tui.commands import CommandHandler
 from app.tui.providers import LoginProvider, ModelProvider
 from app.tui.widgets import MessageOutput, UserInput
-from app.tui.provider_selection import ProviderSelectionScreen
 
 logger = logging.getLogger(__name__)
 

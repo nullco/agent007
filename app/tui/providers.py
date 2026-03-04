@@ -87,14 +87,12 @@ class ModelProvider(Provider):
 
         for model in self._models:
             model_id = model.get("id", "unknown")
-            model_name = model.get("name", model_id)
             provider = model.get("provider", "unknown")
             is_current = "→" if (model_id == current and provider == current_provider) else " "
             display = f"{is_current} {model_id} ({provider})"
             yield DiscoveryHit(
                 display,
-                partial(app._select_model, model_id, provider),
-                help=model_name,
+                partial(app._select_model, model_id, provider)
             )
 
     async def search(self, query: str) -> Hits:
@@ -111,7 +109,6 @@ class ModelProvider(Provider):
 
         for model in self._models:
             model_id = model.get("id", "unknown")
-            model_name = model.get("name", model_id)
             provider = model.get("provider", "unknown")
             is_current = "→" if (model_id == current and provider == current_provider) else " "
             command = f"{is_current} {model_id} ({provider})"
@@ -120,6 +117,5 @@ class ModelProvider(Provider):
                 yield Hit(
                     score,
                     matcher.highlight(command),
-                    partial(app._select_model, model_id, provider),
-                    help=model_name,
+                    partial(app._select_model, model_id, provider)
                 )

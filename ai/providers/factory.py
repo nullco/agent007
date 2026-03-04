@@ -1,14 +1,9 @@
 """Provider factory for selecting AI providers at runtime.
 
-Default provider is 'copilot'. Additional providers can be added to
 _provider_map. Third-party providers can register entry points under
 '007.ai_providers'.
 """
 from __future__ import annotations
-
-import os
-from typing import Optional
-
 from .base import Provider
 
 # List of available providers
