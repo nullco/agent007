@@ -53,7 +53,7 @@ Code: {response.user_code}""")
         state.set("copilot.access_token", credentials.copilot_token)
         state.set("copilot.expires_ms", credentials.expires_ms)
 
-    def build_model(self, model_name: str) -> Model:
+    async def build_model(self, model_name: str) -> Model:
         access_token = state.get("copilot.access_token")
         if not access_token:
             raise ValueError("You need to authenticate first")

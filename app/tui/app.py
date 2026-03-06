@@ -45,7 +45,6 @@ class AgentApp(App):
     def watch_theme(self, theme: str) -> None:
         state.set("theme", theme)
 
-
     def on_text_selected(self, event: TextSelected) -> None:
         selected = self.screen.get_selected_text()
         if not selected:
@@ -79,9 +78,9 @@ class AgentApp(App):
 
         await provider.authenticate(handler)
 
-    def select_model(self, model_id: str, provider_name: str) -> None:
+    async def select_model(self, model_id: str, provider_name: str) -> None:
         provider = get_provider(provider_name)
-        model = provider.build_model(model_id)
+        model = await provider.build_model(model_id)
         if not self._agent:
             self._agent = Agent(model)
         else:
@@ -122,7 +121,7 @@ class AgentApp(App):
             yield UserInput(id="user_input")
         yield ModelFooter(id="footer")
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Initialize the app after mounting."""
         self.input_widget = self.query_one("#user_input", UserInput)
         self.chat_container = self.query_one("#chat-container", ScrollableContainer)
@@ -133,7 +132,7 @@ class AgentApp(App):
             self.theme = theme
         if model_id and provider_name:
             provider = get_provider(provider_name)
-            model = provider.build_model(model_id)
+            model = await provider.build_model(model_id)
             self._agent = Agent(model)
         self._update_model_footer()
         self.input_widget.focus()
