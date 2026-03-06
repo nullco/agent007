@@ -36,7 +36,7 @@ class ModelFooter(Footer):
 
 class AgentApp(App):
 
-    TITLE = "007"
+    TITLE = "Agent 007"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
