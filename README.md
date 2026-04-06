@@ -8,7 +8,7 @@
                              
 ```
 
-A minimalist AI coding agent with a TUI, differential rendering, and synchronized output,
+A minimalist, extensible AI coding agent with a TUI, differential rendering, and synchronized output,
 backported from the [pi.dev](https://pi.dev) coding agent.
 
 ## Installation
