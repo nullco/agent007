@@ -292,11 +292,11 @@ def _make_agent(thinking_level: str = "medium"):
     from pana.agents.agent import Agent
 
     mock_model = MagicMock()
-    mock_model.instance = MagicMock()
+    mock_model.client = MagicMock()
     mock_model.name = "test-model"
     mock_model.provider.name = "test"
 
-    with patch.object(Agent, "_build_agent", return_value=MagicMock()):
+    with patch.object(Agent, "_rebuild_tools"):
         return Agent(mock_model, thinking_level=thinking_level)
 
 
@@ -323,37 +323,29 @@ def test_agent_set_invalid_thinking_level() -> None:
         agent.set_thinking_level("turbo")
 
 
-def test_agent_model_settings_high() -> None:
-    """When thinking is 'high', model_settings should use the unified thinking field."""
+def test_agent_thinking_level_high() -> None:
+    """When thinking is 'high', thinking_level should return 'high'."""
     agent = _make_agent("high")
-    settings = agent._build_model_settings()
-    assert settings is not None
-    assert settings["thinking"] == "high"
+    assert agent.thinking_level == "high"
 
 
-def test_agent_model_settings_off() -> None:
-    """When thinking is 'off', model_settings should be None."""
+def test_agent_thinking_level_off() -> None:
+    """When thinking is 'off', thinking_level should return 'off'."""
     agent = _make_agent("off")
-    assert agent._build_model_settings() is None
+    assert agent.thinking_level == "off"
 
 
-def test_agent_model_settings_xhigh() -> None:
-    """xhigh should be passed through to the unified thinking field."""
+def test_agent_thinking_level_xhigh() -> None:
+    """xhigh should be stored as the thinking level."""
     agent = _make_agent("xhigh")
-    settings = agent._build_model_settings()
-    assert settings is not None
-    assert settings["thinking"] == "xhigh"
+    assert agent.thinking_level == "xhigh"
 
 
-def test_agent_model_settings_all_levels() -> None:
-    """All non-off levels should produce valid model_settings."""
+def test_agent_thinking_level_all_levels() -> None:
+    """All levels should be accepted and stored correctly."""
     for level in THINKING_LEVELS:
         agent = _make_agent(level)
-        settings = agent._build_model_settings()
-        if level == "off":
-            assert settings is None
-        else:
-            assert settings["thinking"] == level
+        assert agent.thinking_level == level
 
 
 # ===================================================================

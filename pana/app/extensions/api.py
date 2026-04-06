@@ -44,7 +44,7 @@ class ToolDefinition:
     """Definition of a custom tool registered by an extension.
 
     The ``execute`` function's type annotations define the tool's parameter
-    schema — pydantic-ai introspects the function signature to build the JSON
+    schema — the agent introspects the function signature to build the JSON
     schema for the LLM.  The docstring is used as the tool description if
     ``description`` is not supplied.
 

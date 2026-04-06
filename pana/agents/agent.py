@@ -1,14 +1,11 @@
 import asyncio
+import inspect
+import json
 import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-
-from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
-from pydantic_ai.agent import Agent as PydanticAgent
-from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.settings import ModelSettings
 
 from pana.agents.skills import Skill, discover_skills
 from pana.agents.system_prompt import build_system_prompt
@@ -18,21 +15,28 @@ from pana.agents.tool_streams import (
     try_extract_partial_args,
 )
 from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
-from pana.ai.providers.model import Model
+from pana.ai.client import ModelStream
+from pana.ai.tools import function_to_tool_def
+from pana.ai.types import (
+    AssistantMessage,
+    ModelSettings,
+    StreamDelta,
+    TextDelta,
+    ThinkingDelta,
+    ToolCall,
+    ToolCallArgsDelta,
+    ToolCallDone,
+    ToolCallStart,
+    ToolDef,
+    ToolResultMessage,
+    UserMessage,
+)
 
 if TYPE_CHECKING:
+    from pana.ai.providers.model import Model
     from pana.app.extensions.manager import ExtensionManager
 
 logger = logging.getLogger(__name__)
-
-
-class _CancelledByEvent(BaseException):
-    """Raised inside node.stream()'s async-with body to trigger clean pydantic-ai
-    teardown (stream_done.set + wrap_task.cancel) when the user cancels via an
-    asyncio.Event rather than task.cancel().  Using a distinct BaseException
-    subclass prevents it from being caught by broad ``except Exception`` clauses
-    and clearly communicates intent.
-    """
 
 
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
@@ -92,20 +96,19 @@ StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent 
 class _RunState:
     """Holds all mutable bookkeeping for a single agent run."""
 
-    # Maps tool_call_id → monotonic start time, used to compute elapsed_s.
     call_started: dict[str, float] = field(default_factory=dict)
-    # IDs for which an early ToolCallEvent has already been emitted during
-    # ModelRequestNode streaming, so CallToolsNode knows to send an Update.
     emitted_early_ids: set[str] = field(default_factory=set)
-    # Per-tool handlers that throttle how often partial-arg updates are emitted.
     stream_handlers: dict[str, ToolStreamHandler] = field(default_factory=build_stream_handlers)
+    accumulated_text: str = ""
+    accumulated_thinking: str = ""
+    accumulated_args: dict[str, str] = field(default_factory=dict)
 
 
 class Agent:
 
     def __init__(
         self,
-        model: Model,
+        model: "Model",
         thinking_level: str = "medium",
         extension_manager: "ExtensionManager | None" = None,
         skills: list[Skill] | None = None,
@@ -116,12 +119,10 @@ class Agent:
         self._skills = skills if skills is not None else discover_skills()
         self._extra_system_prompt: str | None = None
         self._current_cancel_event: asyncio.Event | None = None
-        self._message_history = None
-        self._system_prompt = build_system_prompt(
-            extra_tool_snippets=self._get_extension_tool_snippets(),
-            skills=self._skills,
-        )
-        self._agent = self._build_agent()
+        self._message_history: list = []
+        self._tool_fns: dict[str, Callable] = {}
+        self._tool_defs: list[ToolDef] = []
+        self._rebuild_tools()
 
     def _get_extension_tool_snippets(self) -> dict[str, str]:
         if self._extension_manager is None:
@@ -132,7 +133,6 @@ class Agent:
         }
 
     def _get_all_tools(self) -> list[Callable]:
-        """Return the complete tool list: built-ins (wrapped if extensions present) + extension tools."""
         if self._extension_manager is None:
             return list(_BUILTIN_TOOL_FNS)
 
@@ -143,23 +143,23 @@ class Agent:
             _BUILTIN_TOOL_FNS, _BUILTIN_TOOL_NAMES, cancel_getter
         )
 
-    def _build_agent(self) -> PydanticAgent:
+    def _rebuild_tools(self) -> None:
+        all_tools = self._get_all_tools()
+        self._tool_fns = {}
+        self._tool_defs = []
+        for fn in all_tools:
+            td = function_to_tool_def(fn)
+            self._tool_defs.append(td)
+            self._tool_fns[td.name] = fn
+
+    def _build_system_prompt(self) -> str:
         base_prompt = build_system_prompt(
             extra_tool_snippets=self._get_extension_tool_snippets(),
             skills=self._skills,
         )
         if self._extra_system_prompt:
-            system_prompt = f"{base_prompt}\n\n{self._extra_system_prompt.strip()}"
-        else:
-            system_prompt = base_prompt
-
-        kwargs: dict = {
-            "model": self._model.instance,
-            "tools": self._get_all_tools(),
-        }
-        if system_prompt:
-            kwargs["system_prompt"] = system_prompt
-        return PydanticAgent(**kwargs)
+            return f"{base_prompt}\n\n{self._extra_system_prompt.strip()}"
+        return base_prompt
 
     @property
     def model_name(self) -> str:
@@ -179,30 +179,15 @@ class Agent:
         self._thinking_level = level
 
     def set_extra_system_prompt(self, extra: str | None) -> None:
-        """Set (or clear) additional system-prompt text injected by extensions.
-
-        Rebuilds the pydantic-ai agent only when the value changes.
-        """
         if extra != self._extra_system_prompt:
             self._extra_system_prompt = extra
-            self._agent = self._build_agent()
 
-    def _build_model_settings(self) -> ModelSettings | None:
-        if not self._thinking_level or self._thinking_level == "off":
-            return None
-        return ModelSettings(
-            thinking=self._thinking_level,
-            openai_reasoning_summary="auto",
-        )
-
-    def set_model(self, model: Model) -> None:
+    def set_model(self, model: "Model") -> None:
         self._model = model
-        self._agent = self._build_agent()
 
     def clear_history(self) -> None:
-        self._message_history = None
+        self._message_history = []
         self._extra_system_prompt = None
-        self._agent = self._build_agent()
 
     async def stream(
         self,
@@ -210,19 +195,9 @@ class Agent:
         event_handler: Callable[[StreamEvent], None],
         cancel_event: asyncio.Event | None = None,
     ) -> None:
-        """Run the agent and emit StreamEvents for text, thinking, and tool activity.
-
-        Uses the pydantic-ai iter() graph API so we can interleave streamed text
-        with tool call/result events.  See the private helpers below for the
-        per-node logic.
-
-        cancel_event: when set, exits the streaming loop cleanly at the next
-        token boundary without task.cancel() — avoids pydantic-ai context-manager
-        teardown issues and lets the caller restore the UI immediately.
-        """
         await self._ensure_auth()
         self._current_cancel_event = cancel_event
-        state = _RunState()
+        self._rebuild_tools()
 
         ext = self._extension_manager
         ext_ctx = ext.make_context(signal=cancel_event) if ext else None
@@ -230,275 +205,224 @@ class Agent:
         try:
             if ext and ext_ctx:
                 from pana.app.extensions.api import AgentStartEvent
+
                 await ext.emit("agent_start", AgentStartEvent(prompt=user_input), ext_ctx)
 
+            self._message_history.append(UserMessage(content=user_input))
             turn_index = 0
-            async with self._agent.iter(
-                user_input,
-                message_history=self._message_history,
-                model_settings=self._build_model_settings(),
-            ) as agent_run:
-                try:
-                    node = agent_run.next_node
-                    while not isinstance(node, End):
-                        if cancel_event and cancel_event.is_set():
-                            break
-                        if isinstance(node, ModelRequestNode):
-                            if ext and ext_ctx:
-                                from pana.app.extensions.api import TurnStartEvent
-                                await ext.emit(
-                                    "turn_start",
-                                    TurnStartEvent(turn_index=turn_index),
-                                    ext_ctx,
-                                )
-                            node = await self._stream_model_request_node(
-                                node, agent_run, state, event_handler, cancel_event
-                            )
-                        elif isinstance(node, CallToolsNode):
-                            node = await self._process_call_tools_node(
-                                node, agent_run, state, event_handler
-                            )
-                            if ext and ext_ctx:
-                                from pana.app.extensions.api import TurnEndEvent
-                                await ext.emit(
-                                    "turn_end",
-                                    TurnEndEvent(turn_index=turn_index),
-                                    ext_ctx,
-                                )
-                            turn_index += 1
-                        else:
-                            node = await agent_run.next(node)
-                finally:
-                    self._message_history = agent_run.all_messages()
+
+            while True:
+                if cancel_event and cancel_event.is_set():
+                    break
+
+                if ext and ext_ctx:
+                    from pana.app.extensions.api import TurnStartEvent
+
+                    await ext.emit("turn_start", TurnStartEvent(turn_index=turn_index), ext_ctx)
+
+                state = _RunState()
+                settings = ModelSettings(thinking=self._thinking_level)
+
+                model_stream = await self._model.client.stream(
+                    model=self._model.name,
+                    messages=self._message_history,
+                    tools=self._tool_defs,
+                    system_prompt=self._build_system_prompt(),
+                    settings=settings,
+                )
+
+                tool_calls = await self._consume_stream(
+                    model_stream, state, event_handler, cancel_event
+                )
+
+                if cancel_event and cancel_event.is_set():
+                    break
+
+                assistant_msg = AssistantMessage(
+                    content=state.accumulated_text or None,
+                    tool_calls=tool_calls,
+                    thinking=state.accumulated_thinking or None,
+                )
+                self._message_history.append(assistant_msg)
+
+                if not tool_calls:
+                    if ext and ext_ctx:
+                        from pana.app.extensions.api import TurnEndEvent
+
+                        await ext.emit("turn_end", TurnEndEvent(turn_index=turn_index), ext_ctx)
+                    break
+
+                tool_results = await self._execute_tools(
+                    tool_calls, state, event_handler, cancel_event
+                )
+                self._message_history.extend(tool_results)
+
+                if ext and ext_ctx:
+                    from pana.app.extensions.api import TurnEndEvent
+
+                    await ext.emit("turn_end", TurnEndEvent(turn_index=turn_index), ext_ctx)
+
+                turn_index += 1
+                await asyncio.sleep(0)
 
             if ext and ext_ctx:
                 from pana.app.extensions.api import AgentEndEvent
-                await ext.emit("agent_end", AgentEndEvent(prompt=user_input), ext_ctx)
 
+                await ext.emit("agent_end", AgentEndEvent(prompt=user_input), ext_ctx)
         finally:
             self._current_cancel_event = None
 
     async def _ensure_auth(self) -> None:
-        """Re-authenticate if the provider token is close to expiry."""
         if self._model.provider.should_reauthenticate():
             await self._model.provider.reauthenticate()
             model = await self._model.provider.build_model(self._model.name)
             self.set_model(model)
 
-    async def _stream_model_request_node(
+    async def _consume_stream(
         self,
-        node: ModelRequestNode,
-        agent_run,
+        model_stream: ModelStream,
         state: _RunState,
         event_handler: Callable[[StreamEvent], None],
-        cancel_event: asyncio.Event | None = None,
-    ):
-        """Stream a ModelRequestNode, emitting Text/Thinking/ToolCall events.
-
-        Each response chunk races against cancel_event via asyncio.wait().  When
-        the event fires, _CancelledByEvent is raised *inside* the async-with body
-        so pydantic-ai's finally block (stream_done + wrap_task cleanup) always
-        runs — no dangling tasks, no leaked HTTP connections, no context warnings.
-
-        For app-exit task.cancel(), CancelledError hits the asyncio.wait() await
-        inside the body (same safe zone), so pydantic-ai cleanup also runs there.
-        """
-        last_text = ""
-        last_thinking = ""
-        _user_cancelled = False
+        cancel_event: asyncio.Event | None,
+    ) -> list[ToolCall]:
+        tool_calls: list[ToolCall] = []
+        tool_call_names: dict[str, str] = {}
 
         try:
-            async with node.stream(agent_run.ctx) as stream:
-                # One persistent waiter for the cancel signal — reused across
-                # all iterations so we don't create an extra task per token.
-                cancel_waiter = (
-                    asyncio.ensure_future(cancel_event.wait()) if cancel_event else None
-                )
-                try:
-                    stream_iter = stream.stream_responses(debounce_by=0.05).__aiter__()
-                    while True:
-                        next_item = asyncio.ensure_future(stream_iter.__anext__())
-                        waitables: set[asyncio.Future] = {next_item}
-                        if cancel_waiter:
-                            waitables.add(cancel_waiter)
+            async for delta in model_stream:
+                if cancel_event and cancel_event.is_set():
+                    await model_stream.close()
+                    break
 
-                        done, _ = await asyncio.wait(
-                            waitables, return_when=asyncio.FIRST_COMPLETED
-                        )
+                self._process_delta(delta, state, event_handler, tool_call_names)
+        except Exception:
+            if cancel_event and cancel_event.is_set():
+                pass
+            else:
+                raise
 
-                        if cancel_waiter in done:
-                            # Cancel the pending network read, then signal
-                            # pydantic-ai to tear down wrap_task cleanly.
-                            next_item.cancel()
-                            try:
-                                await next_item
-                            except BaseException:
-                                pass
-                            raise _CancelledByEvent()
+        for tid, args_json in state.accumulated_args.items():
+            name = tool_call_names.get(tid, "")
+            tool_calls.append(ToolCall(id=tid, name=name, arguments=args_json))
 
-                        try:
-                            response = next_item.result()
-                        except StopAsyncIteration:
-                            break
+        return tool_calls
 
-                        cur_thinking = "".join(
-                            p.content
-                            for p in response.parts
-                            if isinstance(p, ThinkingPart) and p.content
-                        )
-                        if cur_thinking and cur_thinking != last_thinking:
-                            last_thinking = cur_thinking
-                            event_handler(ThinkingEvent(text=cur_thinking))
-
-                        cur_text = "".join(
-                            p.content
-                            for p in response.parts
-                            if isinstance(p, TextPart) and p.content
-                        )
-                        if cur_text != last_text:
-                            last_text = cur_text
-                            event_handler(TextEvent(text=cur_text))
-
-                        for part in response.parts:
-                            if isinstance(part, ToolCallPart):
-                                self._handle_streaming_tool_call(part, state, event_handler)
-
-                finally:
-                    # Clean up the cancel waiter whether we exited normally,
-                    # via _CancelledByEvent, or via app-exit CancelledError.
-                    if cancel_waiter and not cancel_waiter.done():
-                        cancel_waiter.cancel()
-
-        except _CancelledByEvent:
-            _user_cancelled = True
-
-        if _user_cancelled:
-            # Don't advance the graph — the outer loop will see cancel_event
-            # is set and break before attempting to re-process this node.
-            return node
-
-        # Advance the graph — stream() caches _result so node is NOT re-executed.
-        return await agent_run.next(node)
-
-    def _handle_streaming_tool_call(
+    def _process_delta(
         self,
-        part: ToolCallPart,
+        delta: StreamDelta,
         state: _RunState,
         event_handler: Callable[[StreamEvent], None],
+        tool_call_names: dict[str, str],
     ) -> None:
-        """Process one ToolCallPart from the streaming response.
+        if isinstance(delta, TextDelta):
+            state.accumulated_text += delta.content
+            event_handler(TextEvent(text=state.accumulated_text))
 
-        First sighting → emit an early ToolCallEvent (args may be partial).
-        Subsequent deltas → throttle via the per-tool stream handler and emit
-        a ToolCallUpdateEvent when the handler decides the update is worth showing.
-        """
-        tid = part.tool_call_id or ""
+        elif isinstance(delta, ThinkingDelta):
+            state.accumulated_thinking += delta.content
+            event_handler(ThinkingEvent(text=state.accumulated_thinking))
 
-        if part.tool_name and tid not in state.emitted_early_ids:
-            state.emitted_early_ids.add(tid)
-            if part.tool_call_id:
-                state.call_started[part.tool_call_id] = time.monotonic()
-            try:
-                early_args: dict | str | None = part.args_as_dict()
-            except Exception:
-                early_args = None
+        elif isinstance(delta, ToolCallStart):
+            tool_call_names[delta.tool_call_id] = delta.tool_name
+            state.emitted_early_ids.add(delta.tool_call_id)
+            state.call_started[delta.tool_call_id] = time.monotonic()
+            state.accumulated_args[delta.tool_call_id] = ""
             event_handler(
                 ToolCallEvent(
-                    tool_call_id=part.tool_call_id,
-                    tool_name=part.tool_name,
-                    args=early_args,
+                    tool_call_id=delta.tool_call_id,
+                    tool_name=delta.tool_name,
+                    args=None,
                 )
             )
-        elif (
-            tid in state.emitted_early_ids
-            and part.tool_name in state.stream_handlers
-            and isinstance(part.args, str)
-        ):
-            partial = try_extract_partial_args(part.args)
-            if partial and "path" in partial:
-                handler = state.stream_handlers[part.tool_name]
-                if handler.should_emit_update(tid, partial):
-                    event_handler(
-                        ToolCallUpdateEvent(
-                            tool_call_id=part.tool_call_id,
-                            tool_name=part.tool_name,
-                            args=partial,
-                        )
-                    )
 
-    async def _process_call_tools_node(
-        self,
-        node: CallToolsNode,
-        agent_run,
-        state: _RunState,
-        event_handler: Callable[[StreamEvent], None],
-    ):
-        """Finalize tool call display, execute tools, then emit ToolResultEvents."""
-        for part in node.model_response.parts:
-            if isinstance(part, ToolCallPart):
-                self._emit_final_tool_call(part, state, event_handler)
-
-        node = await agent_run.next(node)
-        self._emit_tool_results(agent_run.all_messages(), state, event_handler)
-
-        # Yield to the event loop so the TUI can render the result box
-        # (background-colour transition) before text streaming starts again.
-        await asyncio.sleep(0)
-        return node
-
-    def _emit_final_tool_call(
-        self,
-        part: ToolCallPart,
-        state: _RunState,
-        event_handler: Callable[[StreamEvent], None],
-    ) -> None:
-        """Emit a ToolCallEvent or ToolCallUpdateEvent with the completed args."""
-        tid = part.tool_call_id
-        try:
-            full_args: dict | str | None = (
-                part.args_as_dict() if hasattr(part, "args_as_dict") else part.args
+        elif isinstance(delta, ToolCallArgsDelta):
+            state.accumulated_args[delta.tool_call_id] = (
+                state.accumulated_args.get(delta.tool_call_id, "") + delta.args_fragment
             )
-        except Exception:
-            full_args = part.args  # type: ignore[assignment]
-
-        if tid not in state.emitted_early_ids:
-            # No early event was fired (e.g. non-streaming path) — emit now.
-            if tid:
-                state.call_started[tid] = time.monotonic()
-            event_handler(
-                ToolCallEvent(tool_call_id=tid, tool_name=part.tool_name, args=full_args)
-            )
-        else:
-            event_handler(
-                ToolCallUpdateEvent(tool_call_id=tid, tool_name=part.tool_name, args=full_args)
-            )
-
-    def _emit_tool_results(
-        self,
-        messages,
-        state: _RunState,
-        event_handler: Callable[[StreamEvent], None],
-    ) -> None:
-        """Scan the most recent request message for ToolReturnParts and emit events."""
-        for msg in reversed(messages):
-            if msg.kind == "request":
-                for part in msg.parts:
-                    if isinstance(part, ToolReturnPart):
-                        content = part.content
-                        result_text = content if isinstance(content, str) else str(content)
-
-                        elapsed_s = None
-                        tcid = part.tool_call_id
-                        if tcid and tcid in state.call_started:
-                            elapsed_s = time.monotonic() - state.call_started.pop(tcid)
-
+            tool_name = tool_call_names.get(delta.tool_call_id, "")
+            if tool_name in state.stream_handlers:
+                raw = state.accumulated_args[delta.tool_call_id]
+                partial = try_extract_partial_args(raw)
+                if partial and "path" in partial:
+                    handler = state.stream_handlers[tool_name]
+                    if handler.should_emit_update(delta.tool_call_id, partial):
                         event_handler(
-                            ToolResultEvent(
-                                tool_call_id=tcid,
-                                tool_name=part.tool_name,
-                                result=result_text,
-                                elapsed_s=elapsed_s,
-                                is_error=result_text.lstrip().startswith("Error"),
+                            ToolCallUpdateEvent(
+                                tool_call_id=delta.tool_call_id,
+                                tool_name=tool_name,
+                                args=partial,
                             )
                         )
+
+        elif isinstance(delta, ToolCallDone):
+            state.accumulated_args[delta.tool_call_id] = delta.arguments
+            tool_name = tool_call_names.get(delta.tool_call_id, delta.tool_name)
+            try:
+                full_args = json.loads(delta.arguments)
+            except (json.JSONDecodeError, ValueError):
+                full_args = delta.arguments
+            event_handler(
+                ToolCallUpdateEvent(
+                    tool_call_id=delta.tool_call_id,
+                    tool_name=tool_name,
+                    args=full_args,
+                )
+            )
+
+    async def _execute_tools(
+        self,
+        tool_calls: list[ToolCall],
+        state: _RunState,
+        event_handler: Callable[[StreamEvent], None],
+        cancel_event: asyncio.Event | None,
+    ) -> list[ToolResultMessage]:
+        results: list[ToolResultMessage] = []
+
+        for tc in tool_calls:
+            if cancel_event and cancel_event.is_set():
                 break
+
+            fn = self._tool_fns.get(tc.name)
+            if fn is None:
+                result_text = f"Error: unknown tool '{tc.name}'"
+                is_error = True
+            else:
+                try:
+                    kwargs = json.loads(tc.arguments) if tc.arguments else {}
+                except (json.JSONDecodeError, ValueError):
+                    kwargs = {}
+
+                try:
+                    if asyncio.iscoroutinefunction(fn) or inspect.iscoroutinefunction(fn):
+                        result_text = await fn(**kwargs)
+                    else:
+                        result_text = fn(**kwargs)
+                    is_error = result_text.lstrip().startswith("Error")
+                except Exception as exc:
+                    result_text = f"Error: {exc}"
+                    is_error = True
+
+            elapsed_s = None
+            if tc.id in state.call_started:
+                elapsed_s = time.monotonic() - state.call_started.pop(tc.id)
+
+            event_handler(
+                ToolResultEvent(
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=result_text,
+                    elapsed_s=elapsed_s,
+                    is_error=is_error,
+                )
+            )
+
+            results.append(
+                ToolResultMessage(
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    content=result_text,
+                    is_error=is_error,
+                )
+            )
+
+        return results

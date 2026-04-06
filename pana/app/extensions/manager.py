@@ -11,7 +11,7 @@ Usage::
     ctx = manager.make_context()
     await manager.emit("session_start", SessionStartEvent(), ctx)
 
-    # Build pydantic-ai–compatible tool functions:
+    # Build agent-compatible tool functions:
     tools = manager.build_all_tools(cancel_event_getter)
 
     # Build Command objects for the command registry:
@@ -119,18 +119,18 @@ class ExtensionManager:
             tools.extend(api._tools)
         return tools
 
-    def build_pydantic_tool(
+    def build_extension_tool(
         self,
         definition: ToolDefinition,
         cancel_event_getter: Callable[[], asyncio.Event | None],
     ) -> Callable:
-        """Convert a :class:`~pana.extensions.api.ToolDefinition` into a
-        pydantic-ai–compatible async function.
+        """Convert a :class:`~pana.extensions.api.ToolDefinition` into an
+        agent-compatible async function.
 
         The returned callable:
 
         * Has the same parameter signature as ``definition.execute`` (so
-          pydantic-ai can derive the JSON schema for the LLM).
+          the agent can derive the JSON schema for the LLM).
         * Uses ``definition.name`` as ``__name__`` and ``definition.description``
           (or the original docstring) as ``__doc__``.
         * Fires ``tool_call`` before execution and ``tool_result`` after.
@@ -177,7 +177,7 @@ class ExtensionManager:
         """Wrap a built-in tool function with ``tool_call`` / ``tool_result`` events.
 
         The wrapper preserves the original function's signature via
-        ``functools.wraps`` so that pydantic-ai introspects the correct
+        ``functools.wraps`` so that the agent introspects the correct
         parameter schema.
         """
         manager_ref = self
@@ -224,7 +224,7 @@ class ExtensionManager:
         for fn, name in zip(builtin_fns, builtin_names):
             tools.append(self.wrap_builtin_tool(fn, name, cancel_event_getter))
         for defn in self.get_tool_definitions():
-            tools.append(self.build_pydantic_tool(defn, cancel_event_getter))
+            tools.append(self.build_extension_tool(defn, cancel_event_getter))
         return tools
 
     # ------------------------------------------------------------------

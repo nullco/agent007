@@ -1,13 +1,10 @@
 import asyncio
 import time
-from dataclasses import replace
 
 from openai import AsyncOpenAI
-from pydantic_ai.profiles.openai import openai_model_profile
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from pana.ai.providers.auth import CredentialStore
-from pana.ai.providers.copilot.responses import CopilotResponsesModel
+from pana.ai.providers.copilot.client import CopilotClient
 from pana.ai.providers.model import Model
 from pana.ai.providers.provider import Provider
 
@@ -78,14 +75,8 @@ Code: {response.user_code}""")
             api_key=access_token,
             default_headers=COPILOT_HEADERS,
         )
-        provider = OpenAIProvider(openai_client=openai_client)
-        profile = replace(
-            openai_model_profile(model_name),
-            openai_supports_strict_tool_definition=False,
-            openai_supports_encrypted_reasoning_content=False,
-        )
-        model = CopilotResponsesModel(model_name, provider=provider, profile=profile)
-        return Model(model_name, model, self)
+        client = CopilotClient(openai_client)
+        return Model(model_name, client, self)
 
     def get_models(self) -> list[str]:
         return [

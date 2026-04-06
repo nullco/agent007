@@ -27,7 +27,8 @@ classifiers = [
     "Topic :: Terminals",
 ]
 dependencies = [
-    "pydantic-ai",
+    "openai>=1.60.0",
+    "pygments>=2.17.0",
     "pyperclip>=1.11.0",
     "requests",
     "python-dotenv",
