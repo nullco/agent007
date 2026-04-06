@@ -72,6 +72,7 @@ from pana.tui.terminal_image import (
     reset_capabilities_cache,
     set_cell_dimensions,
 )
+from pana.tui.terminal_modes import TerminalModes
 from pana.tui.tui import (
     TUI,
     Component,
@@ -84,9 +85,12 @@ from pana.tui.tui import (
 )
 from pana.tui.utils import truncate_to_width, visible_width, wrap_text_with_ansi
 
-CURSOR_MARKER = ANSI.CURSOR_MARKER
+CURSOR_MARKER = TerminalModes.CURSOR_MARKER
 
 __all__ = [
+    # ansi / terminal modes
+    "ANSI",
+    "TerminalModes",
     # autocomplete
     "AutocompleteItem",
     "AutocompleteProvider",
@@ -165,6 +169,8 @@ __all__ = [
     "render_image",
     "reset_capabilities_cache",
     "set_cell_dimensions",
+    # terminal modes
+    "TerminalModes",
     # tui core
     "CURSOR_MARKER",
     "Component",

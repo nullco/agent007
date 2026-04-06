@@ -10,6 +10,7 @@ from pana.tui.ansi import ANSI
 from pana.tui.keybindings import get_editor_keybindings
 from pana.tui.keys import decode_kitty_printable
 from pana.tui.kill_ring import KillRing
+from pana.tui.terminal_modes import TerminalModes
 from pana.tui.undo_stack import UndoStack
 from pana.tui.utils import (
     is_punctuation_char,
@@ -21,8 +22,8 @@ from pana.tui.utils import (
 PROMPT = "> "
 PROMPT_WIDTH = visible_width(PROMPT)
 
-_PASTE_START = ANSI.PASTE_START
-_PASTE_END = ANSI.PASTE_END
+_PASTE_START = TerminalModes.PASTE_START
+_PASTE_END = TerminalModes.PASTE_END
 
 
 class _UndoState(TypedDict):
@@ -461,7 +462,7 @@ class Input:
         cursor_rendered = f"{ANSI.INVERSE_ON}{display_cursor_char}{ANSI.INVERSE_OFF}"
 
         # Assemble
-        cursor_marker = ANSI.CURSOR_MARKER if self.focused else ""
+        cursor_marker = TerminalModes.CURSOR_MARKER if self.focused else ""
         line_content = before_text + cursor_marker + cursor_rendered + after_text
 
         # Pad to fill content width

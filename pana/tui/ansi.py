@@ -1,8 +1,14 @@
 """Centralized ANSI escape code constants.
 
-All raw ANSI escape sequences used across the TUI layer are defined here
-so they live in one place and can be referenced by name everywhere else.
+Only standard ANSI escape sequences live here: SGR text attributes,
+cursor movement / visibility, and line / screen clearing.
+
+For terminal-specific protocol modes (bracketed paste, Kitty keyboard,
+synchronized output, OSC sequences, etc.) see ``terminal_modes.py``.
 """
+from __future__ import annotations
+
+from pana.tui.terminal_modes import TerminalModes
 
 
 class ANSI:
@@ -61,46 +67,8 @@ class ANSI:
     CLEAR_SCREEN = "\x1b[2J\x1b[H"
     CLEAR_SCROLLBACK = "\x1b[3J"
 
-    # ── Synchronized output (DEC 2026) ─────────────────────────────────
-    SYNC_START = "\x1b[?2026h"
-    SYNC_END = "\x1b[?2026l"
-
-    # ── Bracketed paste mode ───────────────────────────────────────────
-    BRACKETED_PASTE_ON = "\x1b[?2004h"
-    BRACKETED_PASTE_OFF = "\x1b[?2004l"
-    PASTE_START = "\x1b[200~"
-    PASTE_END = "\x1b[201~"
-
-    # ── Kitty keyboard protocol ────────────────────────────────────────
-    KITTY_QUERY = "\x1b[?u"
-    KITTY_ENABLE = "\x1b[>7u"
-    KITTY_DISABLE = "\x1b[<u"
-
-    # ── xterm modifyOtherKeys ──────────────────────────────────────────
-    MODIFY_OTHER_KEYS_ON = "\x1b[>4;2m"
-    MODIFY_OTHER_KEYS_OFF = "\x1b[>4;0m"
-
-    # ── Window / terminal title ────────────────────────────────────────
-    @staticmethod
-    def set_title(title: str) -> str:
-        return f"\x1b]0;{title}\x07"
-
-    # ── Cell-size query (xterm) ────────────────────────────────────────
-    CELL_SIZE_QUERY = "\x1b[16t"
-
-    # ── OSC hyperlink reset ────────────────────────────────────────────
-    HYPERLINK_RESET = "\x1b]8;;\x07"
-
-    # ── OSC 133 semantic zones (shell integration) ──────────────────────
-    OSC133_ZONE_START = "\x1b]133;A\x07"
-    OSC133_ZONE_END   = "\x1b]133;B\x07"
-    OSC133_ZONE_FINAL = "\x1b]133;C\x07"
-
-    # ── Application-level markers ─────────────────────────────────────
-    CURSOR_MARKER = "\x1b_pi:c\x07"  # APC zero-width cursor position marker
-
     # ── Composite helpers ──────────────────────────────────────────────
-    SEGMENT_RESET = RESET + HYPERLINK_RESET
+    SEGMENT_RESET = RESET + TerminalModes.HYPERLINK_RESET
 
     # ── Truecolor helpers ──────────────────────────────────────────────
     @staticmethod

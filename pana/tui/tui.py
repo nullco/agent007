@@ -22,6 +22,7 @@ from pana.tui.terminal_image import (
     is_image_line,
     set_cell_dimensions,
 )
+from pana.tui.terminal_modes import TerminalModes
 from pana.tui.utils import extract_segments, slice_by_column, slice_with_width, visible_width
 
 logger = logging.getLogger(__name__)
@@ -455,13 +456,11 @@ class TUI(Container):
         if not get_capabilities().images:
             return
         self._cell_size_query_pending = True
-        self.terminal.write(ANSI.CELL_SIZE_QUERY)
+        self.terminal.write(TerminalModes.CELL_SIZE_QUERY)
 
     def _parse_cell_size_response(self) -> str:
         """Parse cell-size response from _input_buffer; return remaining data."""
-        import re
-        response_re = re.compile(r"\x1b\[6;(\d+);(\d+)t")
-        m = response_re.search(self._input_buffer)
+        m = TerminalModes.CELL_SIZE_RESPONSE_RE.search(self._input_buffer)
         if m:
             height_px = int(m.group(1))
             width_px = int(m.group(2))
@@ -469,13 +468,12 @@ class TUI(Container):
                 set_cell_dimensions(CellDimensions(width_px=width_px, height_px=height_px))
                 self.invalidate()
                 self.request_render()
-            self._input_buffer = response_re.sub("", self._input_buffer, count=1)
+            self._input_buffer = TerminalModes.CELL_SIZE_RESPONSE_RE.sub("", self._input_buffer, count=1)
             self._cell_size_query_pending = False
 
         # If buffer ends with what looks like an incomplete cell-size response,
         # hold back and wait for more data.
-        partial_re = re.compile(r"\x1b(\[6?;?[\d;]*)?$")
-        if partial_re.search(self._input_buffer):
+        if TerminalModes.CELL_SIZE_PARTIAL_RE.search(self._input_buffer):
             last = self._input_buffer[-1] if self._input_buffer else ""
             if not (last.isalpha() or last == "~"):
                 return ""  # not yet complete — keep buffering
@@ -685,14 +683,14 @@ class TUI(Container):
         def full_render(clear: bool) -> None:
             nonlocal hw_cursor, viewport_top, prev_viewport_top
             self._full_redraw_count += 1
-            buf = ANSI.SYNC_START
+            buf = TerminalModes.SYNC_START
             if clear:
                 buf += ANSI.CLEAR_SCREEN + ANSI.CLEAR_SCROLLBACK
             for i, line in enumerate(new_lines):
                 if i > 0:
                     buf += "\r\n"
                 buf += line
-            buf += ANSI.SYNC_END
+            buf += TerminalModes.SYNC_END
             self.terminal.write(buf)
             self._cursor_row = max(0, len(new_lines) - 1)
             self._hardware_cursor_row = self._cursor_row
@@ -775,7 +773,7 @@ class TUI(Container):
         # All changes are in deleted lines — nothing new to render, just clear
         if first_changed >= len(new_lines):
             if len(self._previous_lines) > len(new_lines):
-                buf = ANSI.SYNC_START
+                buf = TerminalModes.SYNC_START
                 target_row = max(0, len(new_lines) - 1)
                 line_diff = compute_line_diff(target_row)
                 if line_diff > 0:
@@ -796,7 +794,7 @@ class TUI(Container):
                         buf += ANSI.cursor_down(1)
                 if extra_lines > 0:
                     buf += ANSI.cursor_up(extra_lines)
-                buf += ANSI.SYNC_END
+                buf += TerminalModes.SYNC_END
                 self.terminal.write(buf)
                 self._cursor_row = target_row
                 self._hardware_cursor_row = target_row
@@ -817,7 +815,7 @@ class TUI(Container):
             return
 
         # --- Differential update ---
-        buf = ANSI.SYNC_START
+        buf = TerminalModes.SYNC_START
         prev_viewport_bottom = prev_viewport_top + height - 1
         move_target_row = first_changed - 1 if append_start else first_changed
 
@@ -872,7 +870,7 @@ class TUI(Container):
                 buf += "\r\n" + ANSI.CLEAR_FULL_LINE
             buf += ANSI.cursor_up(extra_lines)
 
-        buf += ANSI.SYNC_END
+        buf += TerminalModes.SYNC_END
         self.terminal.write(buf)
 
         self._cursor_row = max(0, len(new_lines) - 1)
@@ -1112,11 +1110,11 @@ class TUI(Container):
         viewport_top = max(0, len(lines) - height)
         for row_idx in range(len(lines) - 1, viewport_top - 1, -1):
             line = lines[row_idx]
-            marker_pos = line.find(ANSI.CURSOR_MARKER)
+            marker_pos = line.find(TerminalModes.CURSOR_MARKER)
             if marker_pos == -1:
                 continue
             col = visible_width(line[:marker_pos])
-            lines[row_idx] = line[:marker_pos] + line[marker_pos + len(ANSI.CURSOR_MARKER):]
+            lines[row_idx] = line[:marker_pos] + line[marker_pos + len(TerminalModes.CURSOR_MARKER):]
             return (row_idx, col)
         return None
 

@@ -12,6 +12,7 @@ from pana.tui.ansi import ANSI
 from pana.tui.keybindings import get_editor_keybindings
 from pana.tui.keys import decode_kitty_printable, matches_key
 from pana.tui.kill_ring import KillRing
+from pana.tui.terminal_modes import TerminalModes
 from pana.tui.undo_stack import UndoStack
 from pana.tui.utils import is_punctuation_char, is_whitespace_char, visible_width
 
@@ -344,7 +345,7 @@ class Editor:
                 cp = ll["cursor_pos"]
                 before = display[:cp]
                 after = display[cp:]
-                marker = ANSI.CURSOR_MARKER if emit_marker else ""
+                marker = TerminalModes.CURSOR_MARKER if emit_marker else ""
 
                 if after:
                     gs = _graphemes(after)
@@ -445,13 +446,13 @@ class Editor:
             self._jump_mode = None
 
         # Bracketed paste
-        if ANSI.PASTE_START in data:
+        if TerminalModes.PASTE_START in data:
             self._is_in_paste = True
             self._paste_buffer = ""
-            data = data.replace(ANSI.PASTE_START, "")
+            data = data.replace(TerminalModes.PASTE_START, "")
         if self._is_in_paste:
             self._paste_buffer += data
-            end_idx = self._paste_buffer.find(ANSI.PASTE_END)
+            end_idx = self._paste_buffer.find(TerminalModes.PASTE_END)
             if end_idx != -1:
                 paste_content = self._paste_buffer[:end_idx]
                 if paste_content:

@@ -20,6 +20,7 @@ from typing import Protocol
 from pana.tui.ansi import ANSI
 from pana.tui.keys import set_kitty_protocol_active
 from pana.tui.stdin_buffer import StdinBuffer
+from pana.tui.terminal_modes import TerminalModes
 
 
 class Terminal(Protocol):
@@ -98,7 +99,7 @@ class ProcessTerminal:
         self._original_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
 
         tty.setraw(fd)
-        self.write(ANSI.BRACKETED_PASTE_ON)
+        self.write(TerminalModes.BRACKETED_PASTE_ON)
 
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGWINCH, self._handle_sigwinch)
@@ -119,15 +120,15 @@ class ProcessTerminal:
                 self._kitty_fallback_handle = None
 
             if self._kitty_protocol_active:
-                self.write(ANSI.KITTY_DISABLE)
+                self.write(TerminalModes.KITTY_DISABLE)
                 self._kitty_protocol_active = False
                 set_kitty_protocol_active(False)
 
             if self._modify_other_keys_active:
-                self.write(ANSI.MODIFY_OTHER_KEYS_OFF)
+                self.write(TerminalModes.MODIFY_OTHER_KEYS_OFF)
                 self._modify_other_keys_active = False
 
-            self.write(ANSI.BRACKETED_PASTE_OFF)
+            self.write(TerminalModes.BRACKETED_PASTE_OFF)
 
             if self._stdin_buffer is not None:
                 self._stdin_buffer.destroy()
@@ -213,16 +214,16 @@ class ProcessTerminal:
         self.write(ANSI.CLEAR_SCREEN)
 
     def set_title(self, title: str) -> None:
-        self.write(ANSI.set_title(title))
+        self.write(TerminalModes.set_title(title))
 
     async def drain_input(self, max_ms: float = 1000, idle_ms: float = 50) -> None:
         # Disable keyboard protocol enhancements before draining
         if self._kitty_protocol_active:
-            self.write(ANSI.KITTY_DISABLE)
+            self.write(TerminalModes.KITTY_DISABLE)
             self._kitty_protocol_active = False
             set_kitty_protocol_active(False)
         if self._modify_other_keys_active:
-            self.write(ANSI.MODIFY_OTHER_KEYS_OFF)
+            self.write(TerminalModes.MODIFY_OTHER_KEYS_OFF)
             self._modify_other_keys_active = False
 
         saved_handler = self._on_input
@@ -289,14 +290,14 @@ class ProcessTerminal:
                     set_kitty_protocol_active(True)
                     # Enable Kitty keyboard protocol:
                     # flag 1 = disambiguate, flag 2 = event types, flag 4 = alternate keys
-                    self.write(ANSI.KITTY_ENABLE)
+                    self.write(TerminalModes.KITTY_ENABLE)
                     return  # Do not forward protocol response to TUI
             if self._on_input is not None:
                 self._on_input(data)
 
         def _on_paste(content: str) -> None:
             if self._on_input is not None:
-                self._on_input(ANSI.PASTE_START + content + ANSI.PASTE_END)
+                self._on_input(TerminalModes.PASTE_START + content + TerminalModes.PASTE_END)
 
         buf.on_data = _on_data
         buf.on_paste = _on_paste
@@ -312,7 +313,7 @@ class ProcessTerminal:
         modifyOtherKeys mode 2 (useful in tmux without Kitty protocol forwarding).
         """
         # Query Kitty support
-        self.write(ANSI.KITTY_QUERY)
+        self.write(TerminalModes.KITTY_QUERY)
 
         def _fallback() -> None:
             self._kitty_fallback_handle = None
