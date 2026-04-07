@@ -221,7 +221,8 @@ class Agent:
                     await ext.emit("turn_start", TurnStartEvent(turn_index=turn_index), ext_ctx)
 
                 state = _RunState()
-                settings = ModelSettings(thinking=self._thinking_level)
+                resolved_thinking = self._model.resolve_thinking(self._thinking_level)
+                settings = ModelSettings(thinking=resolved_thinking)
 
                 model_stream = await self._model.client.stream(
                     model=self._model.name,

@@ -76,7 +76,14 @@ Code: {response.user_code}""")
             default_headers=COPILOT_HEADERS,
         )
         client = CopilotClient(openai_client)
-        return Model(model_name, client, self)
+        thinking_map = {
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "high",
+        }
+        return Model(model_name, client, self, thinking_map=thinking_map)
 
     def get_models(self) -> list[str]:
         return [

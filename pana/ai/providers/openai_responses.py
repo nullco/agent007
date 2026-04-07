@@ -35,15 +35,6 @@ from pana.ai.types import (
 
 logger = logging.getLogger(__name__)
 
-_THINKING_BUDGET = {
-    "minimal": 128,
-    "low": 1024,
-    "medium": 4096,
-    "high": 10240,
-    "xhigh": 32768,
-}
-
-
 def build_input(messages: list[Message]) -> list[dict]:
     """Convert internal messages to OpenAI Responses API input format."""
     items: list[dict] = []
@@ -83,18 +74,11 @@ def build_tools(tool_defs: list[ToolDef]) -> list[dict]:
 
 
 class OpenAIResponsesStream:
-    """Wraps an OpenAI Responses API streaming response, yielding StreamDeltas.
-
-    Tracks ``output_index`` → ``call_id`` so that argument-delta events always
-    carry the correct tool-call identifier, even when the server uses a
-    different ``item_id`` per delta (as GitHub Copilot does).
-    """
+    """Wraps an OpenAI Responses API streaming response, yielding StreamDeltas."""
 
     def __init__(self, response) -> None:
         self._response = response
         self._closed = False
-        self._output_index_to_id: dict[int, str] = {}
-        self._output_index_to_name: dict[int, str] = {}
 
     async def __aiter__(self) -> AsyncIterator[StreamDelta]:
         try:
@@ -123,32 +107,22 @@ class OpenAIResponsesStream:
         if isinstance(event, ResponseOutputItemAddedEvent):
             item = event.item
             if hasattr(item, "call_id") and item.call_id:
-                call_id = item.call_id
-                self._output_index_to_id[event.output_index] = call_id
-                self._output_index_to_name[event.output_index] = item.name
                 return ToolCallStart(
-                    tool_call_id=call_id,
+                    tool_call_id=item.call_id,
                     tool_name=item.name,
                 )
             return None
 
         if isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
-            tool_call_id = self._output_index_to_id.get(
-                event.output_index, event.item_id
-            )
             return ToolCallArgsDelta(
-                tool_call_id=tool_call_id,
+                tool_call_id=event.item_id,
                 args_fragment=event.delta,
             )
 
         if isinstance(event, ResponseFunctionCallArgumentsDoneEvent):
-            tool_call_id = self._output_index_to_id.get(
-                event.output_index, event.item_id
-            )
-            tool_name = self._output_index_to_name.get(event.output_index, "")
             return ToolCallDone(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
+                tool_call_id=event.item_id,
+                tool_name=event.name,
                 arguments=event.arguments,
             )
 
@@ -188,12 +162,20 @@ class OpenAIResponsesClient:
         if tool_specs:
             kwargs["tools"] = tool_specs
 
-        if settings and settings.thinking and settings.thinking != "off":
-            budget = _THINKING_BUDGET.get(settings.thinking, 4096)
-            kwargs["reasoning"] = {
-                "effort": "high" if budget >= 10240 else "medium",
-                "summary": "auto",
-            }
+        self._apply_thinking(kwargs, settings)
 
         response = await self._client.responses.create(**kwargs)
+        return self._wrap_response(response)
+
+    def _wrap_response(self, response) -> OpenAIResponsesStream:
+        """Wrap a raw API response in a stream. Subclasses can override."""
         return OpenAIResponsesStream(response)
+
+    def _apply_thinking(
+        self, kwargs: dict, settings: ModelSettings | None
+    ) -> None:
+        if settings and settings.thinking:
+            kwargs["reasoning"] = {
+                "effort": settings.thinking,
+                "summary": "auto",
+            }
