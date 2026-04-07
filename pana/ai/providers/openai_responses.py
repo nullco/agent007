@@ -79,6 +79,8 @@ class OpenAIResponsesStream:
     def __init__(self, response) -> None:
         self._response = response
         self._closed = False
+        self._call_ids: dict[int, str] = {}
+        self._names: dict[int, str] = {}
 
     async def __aiter__(self) -> AsyncIterator[StreamDelta]:
         try:
@@ -107,6 +109,8 @@ class OpenAIResponsesStream:
         if isinstance(event, ResponseOutputItemAddedEvent):
             item = event.item
             if hasattr(item, "call_id") and item.call_id:
+                self._call_ids[event.output_index] = item.call_id
+                self._names[event.output_index] = item.name
                 return ToolCallStart(
                     tool_call_id=item.call_id,
                     tool_name=item.name,
@@ -114,14 +118,16 @@ class OpenAIResponsesStream:
             return None
 
         if isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
+            call_id = self._call_ids.get(event.output_index, event.item_id)
             return ToolCallArgsDelta(
-                tool_call_id=event.item_id,
+                tool_call_id=call_id,
                 args_fragment=event.delta,
             )
 
         if isinstance(event, ResponseFunctionCallArgumentsDoneEvent):
+            call_id = self._call_ids.get(event.output_index, event.item_id)
             return ToolCallDone(
-                tool_call_id=event.item_id,
+                tool_call_id=call_id,
                 tool_name=event.name,
                 arguments=event.arguments,
             )
@@ -165,10 +171,6 @@ class OpenAIResponsesClient:
         self._apply_thinking(kwargs, settings)
 
         response = await self._client.responses.create(**kwargs)
-        return self._wrap_response(response)
-
-    def _wrap_response(self, response) -> OpenAIResponsesStream:
-        """Wrap a raw API response in a stream. Subclasses can override."""
         return OpenAIResponsesStream(response)
 
     def _apply_thinking(
