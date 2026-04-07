@@ -22,8 +22,9 @@ class ModelCommand(Command):
             provider = get_provider(pname)
             if not provider.is_authenticated():
                 continue
-            for model_id in provider.get_models():
-                options[f"{model_id} ({pname})"] = (model_id, pname)
+            for model_id, info in provider.get_models().items():
+                label = f"{info.display_name} ({pname})"
+                options[label] = (model_id, pname)
 
         if not options:
             ctx.notify("No models available. Login first (/login).", "error")

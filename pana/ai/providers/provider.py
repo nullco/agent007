@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from pana.ai.providers.model import Model
+from pana.ai.providers.model import Model, ModelInfo
 
 
 class Provider(Protocol):
@@ -22,5 +22,5 @@ class Provider(Protocol):
     async def build_model(self, model_name: str) -> Model:
         ...
 
-    def get_models(self) -> list[str]:
+    def get_models(self) -> dict[str, ModelInfo]:
         ...

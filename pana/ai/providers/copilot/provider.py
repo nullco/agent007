@@ -5,7 +5,7 @@ from openai import AsyncOpenAI
 
 from pana.ai.providers.auth import CredentialStore
 from pana.ai.providers.copilot.client import CopilotClient
-from pana.ai.providers.model import Model
+from pana.ai.providers.model import Model, ModelInfo
 from pana.ai.providers.provider import Provider
 
 from .auth import (
@@ -15,6 +15,71 @@ from .auth import (
     poll_for_token,
     start_device_flow,
 )
+
+_OPENAI_THINKING = ["low", "medium", "high"]
+
+MODEL_REGISTRY: dict[str, ModelInfo] = {
+    # --- OpenAI ---
+    "gpt-4.1": ModelInfo(
+        display_name="GPT-4.1",
+        display_details="0x",
+    ),
+    "gpt-4o": ModelInfo(
+        display_name="GPT-4o",
+        display_details="0x",
+    ),
+    "gpt-5-mini": ModelInfo(
+        display_name="GPT-5 Mini",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="medium",
+        display_details="0x",
+    ),
+    "gpt-5.1": ModelInfo(
+        display_name="GPT-5.1",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="medium",
+        display_details="1x",
+    ),
+    "gpt-5.2": ModelInfo(
+        display_name="GPT-5.2",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="medium",
+        display_details="1x",
+    ),
+    "gpt-5.2-codex": ModelInfo(
+        display_name="GPT-5.2 Codex",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="medium",
+        display_details="1x",
+    ),
+    "gpt-5.3-codex": ModelInfo(
+        display_name="GPT-5.3 Codex",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="medium",
+        display_details="1x",
+    ),
+    "gpt-5.4": ModelInfo(
+        display_name="GPT-5.4",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="off",
+        display_details="1x",
+    ),
+    "gpt-5.4-mini": ModelInfo(
+        display_name="GPT-5.4 Mini",
+        thinking_levels=_OPENAI_THINKING,
+        default_thinking="off",
+        display_details="0.33x",
+    ),
+    # --- Fine-tuned OpenAI ---
+    "raptor-mini": ModelInfo(
+        display_name="Raptor Mini",
+        display_details="0x",
+    ),
+    "goldeneye": ModelInfo(
+        display_name="Goldeneye",
+        display_details="free-only",
+    ),
+}
 
 
 class CopilotProvider(Provider):
@@ -76,17 +141,8 @@ Code: {response.user_code}""")
             default_headers=COPILOT_HEADERS,
         )
         client = CopilotClient(openai_client)
-        thinking_map = {
-            "minimal": "low",
-            "low": "low",
-            "medium": "medium",
-            "high": "high",
-            "xhigh": "high",
-        }
-        return Model(model_name, client, self, thinking_map=thinking_map)
+        info = MODEL_REGISTRY.get(model_name)
+        return Model(model_name, client, self, info=info)
 
-    def get_models(self) -> list[str]:
-        return [
-            "gpt-5-mini",
-            "gpt-4.1",
-        ]
+    def get_models(self) -> dict[str, ModelInfo]:
+        return MODEL_REGISTRY

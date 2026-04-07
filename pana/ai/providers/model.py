@@ -1,4 +1,16 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
 from pana.ai.client import ModelClient
+
+
+@dataclass
+class ModelInfo:
+    display_name: str
+    thinking_levels: list[str] = field(default_factory=list)
+    default_thinking: str = "off"
+    display_details: str = ""
 
 
 class Model:
@@ -7,18 +19,32 @@ class Model:
         name: str,
         client: ModelClient,
         provider,
-        thinking_map: dict[str, str] | None = None,
+        info: ModelInfo | None = None,
     ):
         self.name = name
         self.client = client
         self.provider = provider
-        self.thinking_map: dict[str, str] = thinking_map or {}
+        self.info = info or ModelInfo(display_name=name)
+
+    @property
+    def display_name(self) -> str:
+        return self.info.display_name
+
+    @property
+    def default_thinking(self) -> str:
+        return self.info.default_thinking
 
     def resolve_thinking(self, level: str) -> str | None:
-        """Translate an app-level thinking label to a provider-native value.
+        """Return the thinking level to send to the provider.
 
-        Returns ``None`` when the level is ``"off"`` or unknown.
+        Returns ``None`` when the level is ``"off"`` or unsupported.
         """
         if level == "off":
             return None
-        return self.thinking_map.get(level)
+        if level in self.info.thinking_levels:
+            return level
+        return None
+
+    @property
+    def supported_thinking_levels(self) -> list[str]:
+        return ["off", *self.info.thinking_levels]
