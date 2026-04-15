@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import os
-import re
 import signal
 import sys
 import termios
@@ -18,7 +17,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from pana.tui.escape_codes import EscapeCodes
-from pana.tui.keys import set_kitty_protocol_active
+from pana.tui.protocols.kitty.keyboard import KittyKeyboardProtocolController
 from pana.tui.stdin_buffer import StdinBuffer
 
 
@@ -53,9 +52,6 @@ class Terminal(Protocol):
 
     def set_title(self, title: str) -> None: ...
 
-    @property
-    def kitty_protocol_active(self) -> bool: ...
-
     async def drain_input(self, max_ms: float = 1000, idle_ms: float = 50) -> None: ...
 
 
@@ -69,21 +65,14 @@ class ProcessTerminal:
     def __init__(self) -> None:
         self._original_attrs: list[int | list[bytes | int]] | None = None
         self._original_flags: int | None = None
-        self._on_input: Callable[[str], None] | None = None  # points to queue.put_nowait; set None during drain
+        self._on_input: Callable[[str], None] | None = None
         self._on_resize: Callable[[], None] | None = None
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._sigwinch_registered: bool = False
         self._stdin_fd: int | None = None
-        self._kitty_protocol_active: bool = False
-        self._modify_other_keys_active: bool = False
         self._stdin_buffer: StdinBuffer | None = None
-        self._kitty_fallback_handle: asyncio.TimerHandle | None = None
         self._write_log_path: str = os.environ.get("PANA_TUI_WRITE_LOG", "")
-
-    @property
-    def kitty_protocol_active(self) -> bool:
-        return self._kitty_protocol_active
-
+        self._keyboard_protocol = KittyKeyboardProtocolController(self.write)
 
     def start(self, on_resize: Callable[[], None]) -> None:
         self._on_resize = on_resize
@@ -105,28 +94,15 @@ class ProcessTerminal:
         self._sigwinch_registered = True
 
         self._setup_stdin_buffer()
-        self._query_and_enable_kitty_protocol()
+        self._keyboard_protocol.start()
 
         self._on_input = self._input_queue.put_nowait
-
         loop.add_reader(fd, self._read_stdin)
 
     def stop(self) -> None:
         fd = self._stdin_fd
         if fd is not None:
-            if self._kitty_fallback_handle is not None:
-                self._kitty_fallback_handle.cancel()
-                self._kitty_fallback_handle = None
-
-            if self._kitty_protocol_active:
-                self.write(EscapeCodes.KITTY_DISABLE)
-                self._kitty_protocol_active = False
-                set_kitty_protocol_active(False)
-
-            if self._modify_other_keys_active:
-                self.write(EscapeCodes.MODIFY_OTHER_KEYS_OFF)
-                self._modify_other_keys_active = False
-
+            self._keyboard_protocol.stop()
             self.write(EscapeCodes.BRACKETED_PASTE_OFF)
 
             if self._stdin_buffer is not None:
@@ -216,14 +192,7 @@ class ProcessTerminal:
         self.write(EscapeCodes.set_title(title))
 
     async def drain_input(self, max_ms: float = 1000, idle_ms: float = 50) -> None:
-        # Disable keyboard protocol enhancements before draining
-        if self._kitty_protocol_active:
-            self.write(EscapeCodes.KITTY_DISABLE)
-            self._kitty_protocol_active = False
-            set_kitty_protocol_active(False)
-        if self._modify_other_keys_active:
-            self.write(EscapeCodes.MODIFY_OTHER_KEYS_OFF)
-            self._modify_other_keys_active = False
+        self._keyboard_protocol.stop()
 
         saved_handler = self._on_input
         self._on_input = None
@@ -273,24 +242,12 @@ class ProcessTerminal:
                 self._on_input(text)
 
     def _setup_stdin_buffer(self) -> None:
-        """Set up StdinBuffer to split batched input into individual sequences.
-
-        Also watches for Kitty protocol response and enables it when detected.
-        """
+        """Set up StdinBuffer to split batched input into individual sequences."""
         buf = StdinBuffer(timeout_ms=10)
-        kitty_response_re = re.compile(r"^\x1b\[\?(\d+)u$")
 
         def _on_data(data: str) -> None:
-            # Check for Kitty protocol response
-            if not self._kitty_protocol_active:
-                m = kitty_response_re.match(data)
-                if m:
-                    self._kitty_protocol_active = True
-                    set_kitty_protocol_active(True)
-                    # Enable Kitty keyboard protocol:
-                    # flag 1 = disambiguate, flag 2 = event types, flag 4 = alternate keys
-                    self.write(EscapeCodes.KITTY_ENABLE)
-                    return  # Do not forward protocol response to TUI
+            if self._keyboard_protocol.handle_input(data):
+                return
             if self._on_input is not None:
                 self._on_input(data)
 
@@ -301,24 +258,3 @@ class ProcessTerminal:
         buf.on_data = _on_data
         buf.on_paste = _on_paste
         self._stdin_buffer = buf
-
-    def _query_and_enable_kitty_protocol(self) -> None:
-        """Query terminal for Kitty keyboard protocol support.
-
-        Sends CSI ? u to query current flags. If the terminal responds with
-        CSI ? <flags> u, it supports the protocol and we enable it.
-
-        If no Kitty response arrives within 150 ms, fall back to xterm
-        modifyOtherKeys mode 2 (useful in tmux without Kitty protocol forwarding).
-        """
-        # Query Kitty support
-        self.write(EscapeCodes.KITTY_QUERY)
-
-        def _fallback() -> None:
-            self._kitty_fallback_handle = None
-            if not self._kitty_protocol_active and not self._modify_other_keys_active:
-                self.write(EscapeCodes.MODIFY_OTHER_KEYS_ON)
-                self._modify_other_keys_active = True
-
-        loop = asyncio.get_running_loop()
-        self._kitty_fallback_handle = loop.call_later(0.15, _fallback)

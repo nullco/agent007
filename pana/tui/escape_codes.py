@@ -1,8 +1,7 @@
 """Centralized terminal escape and control sequence constants.
 
-This module contains both standard ANSI/CSI sequences and the terminal-
-specific control sequences used by the TUI (DEC private modes, OSC/APC
-sequences, Kitty protocol helpers, and related regexes).
+This module contains standard ANSI/CSI sequences plus non-vendor-specific
+terminal control sequences used by the TUI.
 """
 from __future__ import annotations
 
@@ -73,13 +72,6 @@ class EscapeCodes:
     BRACKETED_PASTE_OFF = "\x1b[?2004l"
     PASTE_START = "\x1b[200~"
     PASTE_END = "\x1b[201~"
-
-    KITTY_QUERY = "\x1b[?u"
-    KITTY_ENABLE = "\x1b[>7u"
-    KITTY_DISABLE = "\x1b[<u"
-
-    MODIFY_OTHER_KEYS_ON = "\x1b[>4;2m"
-    MODIFY_OTHER_KEYS_OFF = "\x1b[>4;0m"
 
     CELL_SIZE_QUERY = "\x1b[16t"
     CELL_SIZE_RESPONSE_RE = re.compile(r"\x1b\[6;(\d+);(\d+)t")

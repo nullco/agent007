@@ -4,12 +4,47 @@ from __future__ import annotations
 import base64
 import math
 import os
-import random
 import struct
 from dataclasses import dataclass
 from typing import Literal
 
+from pana.tui.protocols.kitty.graphics import (
+    allocate_image_id,
+    delete_all_kitty_images,
+    delete_kitty_image,
+    encode_kitty,
+    is_kitty_image_line,
+)
+
 ImageProtocol = Literal["kitty", "iterm2"] | None
+
+__all__ = [
+    "CellDimensions",
+    "ImageDimensions",
+    "ImageProtocol",
+    "ImageRenderOptions",
+    "ImageRenderResult",
+    "TerminalCapabilities",
+    "allocate_image_id",
+    "calculate_image_rows",
+    "delete_all_kitty_images",
+    "delete_kitty_image",
+    "detect_capabilities",
+    "encode_iterm2",
+    "encode_kitty",
+    "get_capabilities",
+    "get_cell_dimensions",
+    "get_gif_dimensions",
+    "get_image_dimensions",
+    "get_jpeg_dimensions",
+    "get_png_dimensions",
+    "get_webp_dimensions",
+    "image_fallback",
+    "is_image_line",
+    "render_image",
+    "reset_capabilities_cache",
+    "set_cell_dimensions",
+]
 
 
 @dataclass
@@ -44,7 +79,6 @@ class ImageRenderResult:
     sequence: str
     rows: int
     image_id: int | None = None
-
 
 
 _cached_capabilities: TerminalCapabilities | None = None
@@ -88,6 +122,7 @@ def detect_capabilities() -> TerminalCapabilities:
     return TerminalCapabilities(images=None, true_color=true_color, hyperlinks=True)
 
 
+
 def get_capabilities() -> TerminalCapabilities:
     global _cached_capabilities
     if _cached_capabilities is None:
@@ -95,83 +130,21 @@ def get_capabilities() -> TerminalCapabilities:
     return _cached_capabilities
 
 
+
 def reset_capabilities_cache() -> None:
     global _cached_capabilities
     _cached_capabilities = None
 
 
-
-_KITTY_PREFIX = "\x1b_G"
 _ITERM2_PREFIX = "\x1b]1337;File="
+
 
 
 def is_image_line(line: str) -> bool:
     """Return True if *line* contains a Kitty or iTerm2 image sequence."""
-    # Fast path: check start of line
-    if line.startswith(_KITTY_PREFIX) or line.startswith(_ITERM2_PREFIX):
+    if is_kitty_image_line(line) or line.startswith(_ITERM2_PREFIX):
         return True
-    # Slow path: check anywhere in line
-    return _KITTY_PREFIX in line or _ITERM2_PREFIX in line
-
-
-
-def allocate_image_id() -> int:
-    """Generate a random image ID for Kitty graphics protocol."""
-    return random.randint(1, 0xFFFFFFFF)
-
-
-
-_CHUNK_SIZE = 4096
-
-
-def encode_kitty(
-    base64_data: str,
-    *,
-    columns: int | None = None,
-    rows: int | None = None,
-    image_id: int | None = None,
-) -> str:
-    """Encode image data using the Kitty graphics protocol."""
-    params: list[str] = ["a=T", "f=100", "q=2"]
-    if columns is not None:
-        params.append(f"c={columns}")
-    if rows is not None:
-        params.append(f"r={rows}")
-    if image_id is not None:
-        params.append(f"i={image_id}")
-
-    if len(base64_data) <= _CHUNK_SIZE:
-        return f"\x1b_G{','.join(params)};{base64_data}\x1b\\"
-
-    chunks: list[str] = []
-    offset = 0
-    is_first = True
-
-    while offset < len(base64_data):
-        chunk = base64_data[offset:offset + _CHUNK_SIZE]
-        is_last = offset + _CHUNK_SIZE >= len(base64_data)
-
-        if is_first:
-            chunks.append(f"\x1b_G{','.join(params)},m=1;{chunk}\x1b\\")
-            is_first = False
-        elif is_last:
-            chunks.append(f"\x1b_Gm=0;{chunk}\x1b\\")
-        else:
-            chunks.append(f"\x1b_Gm=1;{chunk}\x1b\\")
-
-        offset += _CHUNK_SIZE
-
-    return "".join(chunks)
-
-
-def delete_kitty_image(image_id: int) -> str:
-    """Delete a Kitty graphics image by ID."""
-    return f"\x1b_Ga=d,d=I,i={image_id}\x1b\\"
-
-
-def delete_all_kitty_images() -> str:
-    """Delete all visible Kitty graphics images."""
-    return "\x1b_Ga=d,d=A\x1b\\"
+    return _ITERM2_PREFIX in line
 
 
 
@@ -233,6 +206,7 @@ def get_png_dimensions(base64_data: str) -> ImageDimensions | None:
         return None
 
 
+
 def get_jpeg_dimensions(base64_data: str) -> ImageDimensions | None:
     """Extract dimensions from a base64-encoded JPEG."""
     try:
@@ -249,12 +223,12 @@ def get_jpeg_dimensions(base64_data: str) -> ImageDimensions | None:
                 continue
             marker = data[offset + 1]
             if 0xC0 <= marker <= 0xC2:
-                height = struct.unpack(">H", data[offset + 5:offset + 7])[0]
-                width = struct.unpack(">H", data[offset + 7:offset + 9])[0]
+                height = struct.unpack(">H", data[offset + 5 : offset + 7])[0]
+                width = struct.unpack(">H", data[offset + 7 : offset + 9])[0]
                 return ImageDimensions(width_px=width, height_px=height)
             if offset + 3 >= len(data):
                 return None
-            length = struct.unpack(">H", data[offset + 2:offset + 4])[0]
+            length = struct.unpack(">H", data[offset + 2 : offset + 4])[0]
             if length < 2:
                 return None
             offset += 2 + length
@@ -262,6 +236,7 @@ def get_jpeg_dimensions(base64_data: str) -> ImageDimensions | None:
         return None
     except Exception:
         return None
+
 
 
 def get_gif_dimensions(base64_data: str) -> ImageDimensions | None:
@@ -278,6 +253,7 @@ def get_gif_dimensions(base64_data: str) -> ImageDimensions | None:
         return ImageDimensions(width_px=width, height_px=height)
     except Exception:
         return None
+
 
 
 def get_webp_dimensions(base64_data: str) -> ImageDimensions | None:
@@ -298,14 +274,14 @@ def get_webp_dimensions(base64_data: str) -> ImageDimensions | None:
             width = struct.unpack("<H", data[26:28])[0] & 0x3FFF
             height = struct.unpack("<H", data[28:30])[0] & 0x3FFF
             return ImageDimensions(width_px=width, height_px=height)
-        elif chunk == "VP8L":
+        if chunk == "VP8L":
             if len(data) < 25:
                 return None
             bits = struct.unpack("<I", data[21:25])[0]
             width = (bits & 0x3FFF) + 1
             height = ((bits >> 14) & 0x3FFF) + 1
             return ImageDimensions(width_px=width, height_px=height)
-        elif chunk == "VP8X":
+        if chunk == "VP8X":
             if len(data) < 30:
                 return None
             width = (data[24] | (data[25] << 8) | (data[26] << 16)) + 1
@@ -315,6 +291,7 @@ def get_webp_dimensions(base64_data: str) -> ImageDimensions | None:
         return None
     except Exception:
         return None
+
 
 
 def get_image_dimensions(base64_data: str, mime_type: str) -> ImageDimensions | None:
@@ -366,6 +343,7 @@ def render_image(
         return ImageRenderResult(sequence=sequence, rows=rows)
 
     return None
+
 
 
 def image_fallback(
