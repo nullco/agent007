@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from pana.tui.ansi import ANSI
+from pana.tui.escape_codes import EscapeCodes
 from pana.tui.keys import is_key_release, matches_key
 from pana.tui.terminal import Terminal
 from pana.tui.terminal_image import (
@@ -22,7 +22,6 @@ from pana.tui.terminal_image import (
     is_image_line,
     set_cell_dimensions,
 )
-from pana.tui.terminal_modes import TerminalModes
 from pana.tui.utils import extract_segments, slice_by_column, slice_with_width, visible_width
 
 logger = logging.getLogger(__name__)
@@ -456,11 +455,11 @@ class TUI(Container):
         if not get_capabilities().images:
             return
         self._cell_size_query_pending = True
-        self.terminal.write(TerminalModes.CELL_SIZE_QUERY)
+        self.terminal.write(EscapeCodes.CELL_SIZE_QUERY)
 
     def _parse_cell_size_response(self) -> str:
         """Parse cell-size response from _input_buffer; return remaining data."""
-        m = TerminalModes.CELL_SIZE_RESPONSE_RE.search(self._input_buffer)
+        m = EscapeCodes.CELL_SIZE_RESPONSE_RE.search(self._input_buffer)
         if m:
             height_px = int(m.group(1))
             width_px = int(m.group(2))
@@ -468,12 +467,12 @@ class TUI(Container):
                 set_cell_dimensions(CellDimensions(width_px=width_px, height_px=height_px))
                 self.invalidate()
                 self.request_render()
-            self._input_buffer = TerminalModes.CELL_SIZE_RESPONSE_RE.sub("", self._input_buffer, count=1)
+            self._input_buffer = EscapeCodes.CELL_SIZE_RESPONSE_RE.sub("", self._input_buffer, count=1)
             self._cell_size_query_pending = False
 
         # If buffer ends with what looks like an incomplete cell-size response,
         # hold back and wait for more data.
-        if TerminalModes.CELL_SIZE_PARTIAL_RE.search(self._input_buffer):
+        if EscapeCodes.CELL_SIZE_PARTIAL_RE.search(self._input_buffer):
             last = self._input_buffer[-1] if self._input_buffer else ""
             if not (last.isalpha() or last == "~"):
                 return ""  # not yet complete — keep buffering
@@ -509,9 +508,9 @@ class TUI(Container):
             target_row = len(self._previous_lines)
             line_diff = target_row - self._hardware_cursor_row
             if line_diff > 0:
-                self.terminal.write(ANSI.cursor_down(line_diff))
+                self.terminal.write(EscapeCodes.cursor_down(line_diff))
             elif line_diff < 0:
-                self.terminal.write(ANSI.cursor_up(-line_diff))
+                self.terminal.write(EscapeCodes.cursor_up(-line_diff))
             self.terminal.write("\r\n")
         self.terminal.show_cursor()
         self.terminal.stop()
@@ -683,14 +682,14 @@ class TUI(Container):
         def full_render(clear: bool) -> None:
             nonlocal hw_cursor, viewport_top, prev_viewport_top
             self._full_redraw_count += 1
-            buf = TerminalModes.SYNC_START
+            buf = EscapeCodes.SYNC_START
             if clear:
-                buf += ANSI.CLEAR_SCREEN + ANSI.CLEAR_SCROLLBACK
+                buf += EscapeCodes.CLEAR_SCREEN + EscapeCodes.CLEAR_SCROLLBACK
             for i, line in enumerate(new_lines):
                 if i > 0:
                     buf += "\r\n"
                 buf += line
-            buf += TerminalModes.SYNC_END
+            buf += EscapeCodes.SYNC_END
             self.terminal.write(buf)
             self._cursor_row = max(0, len(new_lines) - 1)
             self._hardware_cursor_row = self._cursor_row
@@ -773,13 +772,13 @@ class TUI(Container):
         # All changes are in deleted lines — nothing new to render, just clear
         if first_changed >= len(new_lines):
             if len(self._previous_lines) > len(new_lines):
-                buf = TerminalModes.SYNC_START
+                buf = EscapeCodes.SYNC_START
                 target_row = max(0, len(new_lines) - 1)
                 line_diff = compute_line_diff(target_row)
                 if line_diff > 0:
-                    buf += ANSI.cursor_down(line_diff)
+                    buf += EscapeCodes.cursor_down(line_diff)
                 elif line_diff < 0:
-                    buf += ANSI.cursor_up(-line_diff)
+                    buf += EscapeCodes.cursor_up(-line_diff)
                 buf += "\r"
                 extra_lines = len(self._previous_lines) - len(new_lines)
                 if extra_lines > height:
@@ -787,14 +786,14 @@ class TUI(Container):
                     full_render(True)
                     return
                 if extra_lines > 0:
-                    buf += ANSI.cursor_down(1)
+                    buf += EscapeCodes.cursor_down(1)
                 for i in range(extra_lines):
-                    buf += "\r" + ANSI.CLEAR_FULL_LINE
+                    buf += "\r" + EscapeCodes.CLEAR_FULL_LINE
                     if i < extra_lines - 1:
-                        buf += ANSI.cursor_down(1)
+                        buf += EscapeCodes.cursor_down(1)
                 if extra_lines > 0:
-                    buf += ANSI.cursor_up(extra_lines)
-                buf += TerminalModes.SYNC_END
+                    buf += EscapeCodes.cursor_up(extra_lines)
+                buf += EscapeCodes.SYNC_END
                 self.terminal.write(buf)
                 self._cursor_row = target_row
                 self._hardware_cursor_row = target_row
@@ -815,7 +814,7 @@ class TUI(Container):
             return
 
         # --- Differential update ---
-        buf = TerminalModes.SYNC_START
+        buf = EscapeCodes.SYNC_START
         prev_viewport_bottom = prev_viewport_top + height - 1
         move_target_row = first_changed - 1 if append_start else first_changed
 
@@ -824,7 +823,7 @@ class TUI(Container):
             current_screen_row = max(0, min(height - 1, hw_cursor - prev_viewport_top))
             move_to_bottom = height - 1 - current_screen_row
             if move_to_bottom > 0:
-                buf += ANSI.cursor_down(move_to_bottom)
+                buf += EscapeCodes.cursor_down(move_to_bottom)
             scroll = move_target_row - prev_viewport_bottom
             buf += "\r\n" * scroll
             prev_viewport_top += scroll
@@ -833,16 +832,16 @@ class TUI(Container):
 
         line_diff = compute_line_diff(move_target_row)
         if line_diff > 0:
-            buf += ANSI.cursor_down(line_diff)
+            buf += EscapeCodes.cursor_down(line_diff)
         elif line_diff < 0:
-            buf += ANSI.cursor_up(-line_diff)
+            buf += EscapeCodes.cursor_up(-line_diff)
         buf += "\r\n" if append_start else "\r"
 
         render_end = min(last_changed, len(new_lines) - 1)
         for i in range(first_changed, render_end + 1):
             if i > first_changed:
                 buf += "\r\n"
-            buf += ANSI.CLEAR_FULL_LINE
+            buf += EscapeCodes.CLEAR_FULL_LINE
             line = new_lines[i]
             # Crash protection: a line wider than the terminal would corrupt the display
             if not is_image_line(line) and visible_width(line) > width:
@@ -863,14 +862,14 @@ class TUI(Container):
         if len(self._previous_lines) > len(new_lines):
             if render_end < len(new_lines) - 1:
                 move_down = len(new_lines) - 1 - render_end
-                buf += ANSI.cursor_down(move_down)
+                buf += EscapeCodes.cursor_down(move_down)
                 final_cursor_row = len(new_lines) - 1
             extra_lines = len(self._previous_lines) - len(new_lines)
             for _ in range(extra_lines):
-                buf += "\r\n" + ANSI.CLEAR_FULL_LINE
-            buf += ANSI.cursor_up(extra_lines)
+                buf += "\r\n" + EscapeCodes.CLEAR_FULL_LINE
+            buf += EscapeCodes.cursor_up(extra_lines)
 
-        buf += TerminalModes.SYNC_END
+        buf += EscapeCodes.SYNC_END
         self.terminal.write(buf)
 
         self._cursor_row = max(0, len(new_lines) - 1)
@@ -884,7 +883,7 @@ class TUI(Container):
 
 
     def _apply_line_resets(self, lines: list[str]) -> list[str]:
-        reset = ANSI.SEGMENT_RESET
+        reset = EscapeCodes.SEGMENT_RESET
         for i, line in enumerate(lines):
             if not is_image_line(line):
                 lines[i] = line + reset
@@ -1082,7 +1081,7 @@ class TUI(Container):
         after_target = max(0, total_width - actual_before_w - actual_overlay_w)
         after_pad = max(0, after_target - after_width)
 
-        r = ANSI.SEGMENT_RESET
+        r = EscapeCodes.SEGMENT_RESET
         result = (
             str(segs["before"])
             + " " * before_pad
@@ -1110,11 +1109,11 @@ class TUI(Container):
         viewport_top = max(0, len(lines) - height)
         for row_idx in range(len(lines) - 1, viewport_top - 1, -1):
             line = lines[row_idx]
-            marker_pos = line.find(TerminalModes.CURSOR_MARKER)
+            marker_pos = line.find(EscapeCodes.CURSOR_MARKER)
             if marker_pos == -1:
                 continue
             col = visible_width(line[:marker_pos])
-            lines[row_idx] = line[:marker_pos] + line[marker_pos + len(TerminalModes.CURSOR_MARKER):]
+            lines[row_idx] = line[:marker_pos] + line[marker_pos + len(EscapeCodes.CURSOR_MARKER):]
             return (row_idx, col)
         return None
 
@@ -1135,10 +1134,10 @@ class TUI(Container):
         row_delta = target_row - self._hardware_cursor_row
         buf = ""
         if row_delta > 0:
-            buf += ANSI.cursor_down(row_delta)
+            buf += EscapeCodes.cursor_down(row_delta)
         elif row_delta < 0:
-            buf += ANSI.cursor_up(-row_delta)
-        buf += ANSI.cursor_column(target_col + 1)
+            buf += EscapeCodes.cursor_up(-row_delta)
+        buf += EscapeCodes.cursor_column(target_col + 1)
 
         if buf:
             self.terminal.write(buf)

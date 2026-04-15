@@ -33,8 +33,8 @@ from pana.tui.components.footer import Footer
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.user_message import UserMessage
+from pana.tui.escape_codes import EscapeCodes
 from pana.tui.terminal import ProcessTerminal
-from pana.tui.terminal_modes import TerminalModes
 from pana.tui.theme import PanaTheme, discover_themes
 from pana.tui.tui import TUI, Container
 
@@ -305,7 +305,7 @@ class PanaApp:
 
     def set_title(self, title: str) -> None:
         """Set the terminal window/tab title via an OSC escape sequence."""
-        sys.stdout.write(TerminalModes.set_title(title))
+        sys.stdout.write(EscapeCodes.set_title(title))
         sys.stdout.flush()
 
     def _load_extensions(self) -> None:

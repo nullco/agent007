@@ -1,17 +1,15 @@
-"""Centralized ANSI escape code constants.
+"""Centralized terminal escape and control sequence constants.
 
-Only standard ANSI escape sequences live here: SGR text attributes,
-cursor movement / visibility, and line / screen clearing.
-
-For terminal-specific protocol modes (bracketed paste, Kitty keyboard,
-synchronized output, OSC sequences, etc.) see ``terminal_modes.py``.
+This module contains both standard ANSI/CSI sequences and the terminal-
+specific control sequences used by the TUI (DEC private modes, OSC/APC
+sequences, Kitty protocol helpers, and related regexes).
 """
 from __future__ import annotations
 
-from pana.tui.terminal_modes import TerminalModes
+import re
 
 
-class ANSI:
+class EscapeCodes:
     # ── Full reset ──────────────────────────────────────────────────────
     RESET = "\x1b[0m"
 
@@ -67,8 +65,38 @@ class ANSI:
     CLEAR_SCREEN = "\x1b[2J\x1b[H"
     CLEAR_SCROLLBACK = "\x1b[3J"
 
+    # ── Terminal protocol extensions ──────────────────────────────────
+    SYNC_START = "\x1b[?2026h"
+    SYNC_END = "\x1b[?2026l"
+
+    BRACKETED_PASTE_ON = "\x1b[?2004h"
+    BRACKETED_PASTE_OFF = "\x1b[?2004l"
+    PASTE_START = "\x1b[200~"
+    PASTE_END = "\x1b[201~"
+
+    KITTY_QUERY = "\x1b[?u"
+    KITTY_ENABLE = "\x1b[>7u"
+    KITTY_DISABLE = "\x1b[<u"
+
+    MODIFY_OTHER_KEYS_ON = "\x1b[>4;2m"
+    MODIFY_OTHER_KEYS_OFF = "\x1b[>4;0m"
+
+    CELL_SIZE_QUERY = "\x1b[16t"
+    CELL_SIZE_RESPONSE_RE = re.compile(r"\x1b\[6;(\d+);(\d+)t")
+    CELL_SIZE_PARTIAL_RE = re.compile(r"\x1b(\[6?;?[\d;]*)?$")
+
+    HYPERLINK_RESET = "\x1b]8;;\x07"
+    OSC133_ZONE_START = "\x1b]133;A\x07"
+    OSC133_ZONE_END = "\x1b]133;B\x07"
+    OSC133_ZONE_FINAL = "\x1b]133;C\x07"
+    CURSOR_MARKER = "\x1b_pi:c\x07"
+
+    @staticmethod
+    def set_title(title: str) -> str:
+        return f"\x1b]0;{title}\x07"
+
     # ── Composite helpers ──────────────────────────────────────────────
-    SEGMENT_RESET = RESET + TerminalModes.HYPERLINK_RESET
+    SEGMENT_RESET = RESET + HYPERLINK_RESET
 
     # ── Truecolor helpers ──────────────────────────────────────────────
     @staticmethod

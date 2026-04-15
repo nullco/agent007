@@ -50,7 +50,7 @@ from pygments.token import (
     Token,
 )
 
-from pana.tui.ansi import ANSI
+from pana.tui.escape_codes import EscapeCodes
 
 ColorFn = Callable[[str], str]
 
@@ -116,14 +116,14 @@ _IDENTITY: ColorFn = lambda s: s  # noqa: E731
 
 def _make_fg(rgb: tuple[int, int, int]) -> ColorFn:
     r, g, b = rgb
-    code = ANSI.fg_rgb(r, g, b)
-    return lambda s: f"{code}{s}{ANSI.FG_RESET}"
+    code = EscapeCodes.fg_rgb(r, g, b)
+    return lambda s: f"{code}{s}{EscapeCodes.FG_RESET}"
 
 
 def _make_bg(rgb: tuple[int, int, int]) -> ColorFn:
     r, g, b = rgb
-    code = ANSI.bg_rgb(r, g, b)
-    return lambda s: f"{code}{s}{ANSI.BG_RESET}"
+    code = EscapeCodes.bg_rgb(r, g, b)
+    return lambda s: f"{code}{s}{EscapeCodes.BG_RESET}"
 
 
 def _color_to_hex(rgb: tuple[int, int, int]) -> str:

@@ -8,7 +8,7 @@ from typing import Callable
 import grapheme
 import wcwidth
 
-from pana.tui.ansi import ANSI
+from pana.tui.escape_codes import EscapeCodes
 
 _WHITESPACE_RE = re.compile(r"\s")
 _PUNCTUATION_CATS = frozenset({"Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sc", "Sk", "Sm", "So"})
@@ -141,21 +141,21 @@ class AnsiCodeTracker:
             if p == 0:
                 self.clear()
             elif p == 1:
-                self.bold = ANSI.BOLD_ON
+                self.bold = EscapeCodes.BOLD_ON
             elif p == 2:
-                self.dim = ANSI.DIM_ON
+                self.dim = EscapeCodes.DIM_ON
             elif p == 3:
-                self.italic = ANSI.ITALIC_ON
+                self.italic = EscapeCodes.ITALIC_ON
             elif p == 4:
-                self.underline = ANSI.UNDERLINE_ON
+                self.underline = EscapeCodes.UNDERLINE_ON
             elif p == 5:
-                self.blink = ANSI.BLINK_ON
+                self.blink = EscapeCodes.BLINK_ON
             elif p == 7:
-                self.inverse = ANSI.INVERSE_ON
+                self.inverse = EscapeCodes.INVERSE_ON
             elif p == 8:
-                self.hidden = ANSI.HIDDEN_ON
+                self.hidden = EscapeCodes.HIDDEN_ON
             elif p == 9:
-                self.strikethrough = ANSI.STRIKETHROUGH_ON
+                self.strikethrough = EscapeCodes.STRIKETHROUGH_ON
             elif p == 21:
                 self.bold = None
             elif p == 22:
@@ -239,7 +239,7 @@ class AnsiCodeTracker:
 
     def get_line_end_reset(self) -> str:
         if self.underline is not None:
-            return ANSI.UNDERLINE_OFF
+            return EscapeCodes.UNDERLINE_OFF
         return ""
 
 
@@ -319,7 +319,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
                 else:
                     # wrap
                     if tracker.has_active_codes():
-                        current_line += tracker.get_line_end_reset() + ANSI.RESET
+                        current_line += tracker.get_line_end_reset() + EscapeCodes.RESET
                     lines.append(current_line)
                     current_line = tracker.get_active_codes()
                     current_width = 0
@@ -331,7 +331,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
             elif token_width <= width:
                 # Word fits on a new line
                 if tracker.has_active_codes():
-                    current_line += tracker.get_line_end_reset() + ANSI.RESET
+                    current_line += tracker.get_line_end_reset() + EscapeCodes.RESET
                 lines.append(current_line)
                 current_line = tracker.get_active_codes() + token
                 current_width = token_width
@@ -344,7 +344,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
                         current_width += visible_width(part)
                     else:
                         if tracker.has_active_codes():
-                            current_line += tracker.get_line_end_reset() + ANSI.RESET
+                            current_line += tracker.get_line_end_reset() + EscapeCodes.RESET
                         lines.append(current_line)
                         current_line = tracker.get_active_codes() + part
                         current_width = visible_width(part)
@@ -360,7 +360,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
                     ti += 1
 
         if tracker.has_active_codes():
-            current_line += tracker.get_line_end_reset() + ANSI.RESET
+            current_line += tracker.get_line_end_reset() + EscapeCodes.RESET
         lines.append(current_line)
         result.extend(lines)
 
@@ -379,7 +379,7 @@ def apply_background_to_line(line: str, width: int, bg_fn: Callable[[str], str])
     if m:
         bg_code = m.group(1)
         # Re-inject bg_code after every full reset (\x1b[0m) inside content
-        content = content.replace(ANSI.RESET, ANSI.RESET + bg_code)
+        content = content.replace(EscapeCodes.RESET, EscapeCodes.RESET + bg_code)
 
     return bg_fn(content)
 

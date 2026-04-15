@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pana.tui.components.text import Text
-from pana.tui.terminal_modes import TerminalModes
+from pana.tui.escape_codes import EscapeCodes
 
 
 class UserMessage(Text):
@@ -13,6 +13,6 @@ class UserMessage(Text):
         if not lines:
             return lines
         lines = list(lines)
-        lines[0] = TerminalModes.OSC133_ZONE_START + lines[0]
-        lines[-1] = lines[-1] + TerminalModes.OSC133_ZONE_END + TerminalModes.OSC133_ZONE_FINAL
+        lines[0] = EscapeCodes.OSC133_ZONE_START + lines[0]
+        lines[-1] = lines[-1] + EscapeCodes.OSC133_ZONE_END + EscapeCodes.OSC133_ZONE_FINAL
         return lines

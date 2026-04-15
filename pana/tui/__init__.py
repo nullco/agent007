@@ -3,7 +3,6 @@
 Provides terminal UI components, keyboard handling, differential rendering,
 and overlay management.
 """
-from pana.tui.ansi import ANSI
 from pana.tui.autocomplete import (
     AutocompleteItem,
     AutocompleteProvider,
@@ -29,6 +28,7 @@ from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.truncated_text import TruncatedText
 from pana.tui.editor_component import EditorComponent
+from pana.tui.escape_codes import EscapeCodes
 from pana.tui.fuzzy import FuzzyMatch, fuzzy_filter, fuzzy_match
 from pana.tui.keybindings import (
     TUI_KEYBINDINGS,
@@ -72,7 +72,6 @@ from pana.tui.terminal_image import (
     reset_capabilities_cache,
     set_cell_dimensions,
 )
-from pana.tui.terminal_modes import TerminalModes
 from pana.tui.tui import (
     TUI,
     Component,
@@ -85,12 +84,11 @@ from pana.tui.tui import (
 )
 from pana.tui.utils import truncate_to_width, visible_width, wrap_text_with_ansi
 
-CURSOR_MARKER = TerminalModes.CURSOR_MARKER
+CURSOR_MARKER = EscapeCodes.CURSOR_MARKER
 
 __all__ = [
-    # ansi / terminal modes
-    "ANSI",
-    "TerminalModes",
+    # ansi
+    "EscapeCodes",
     # autocomplete
     "AutocompleteItem",
     "AutocompleteProvider",
@@ -169,8 +167,6 @@ __all__ = [
     "render_image",
     "reset_capabilities_cache",
     "set_cell_dimensions",
-    # terminal modes
-    "TerminalModes",
     # tui core
     "CURSOR_MARKER",
     "Component",

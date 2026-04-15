@@ -5,7 +5,7 @@ call updates every subsequent render without rebuilding any component.
 """
 from __future__ import annotations
 
-from pana.tui.ansi import ANSI
+from pana.tui.escape_codes import EscapeCodes
 from pana.tui.theme import PanaTheme, load_theme
 
 _current_theme: PanaTheme = load_theme("dark")
@@ -44,11 +44,11 @@ def tool_success_bg(s: str) -> str: return _current_theme.tool_success_bg(s)
 def tool_error_bg(s: str)   -> str: return _current_theme.tool_error_bg(s)
 
 # Text attributes — theme-independent ANSI codes
-def bold(s: str)          -> str: return f"{ANSI.BOLD_ON}{s}{ANSI.BOLD_OFF}"
-def italic(s: str)        -> str: return f"{ANSI.ITALIC_ON}{s}{ANSI.ITALIC_OFF}"
-def underline(s: str)     -> str: return f"{ANSI.UNDERLINE_ON}{s}{ANSI.UNDERLINE_OFF}"
-def strikethrough(s: str) -> str: return f"{ANSI.STRIKETHROUGH_ON}{s}{ANSI.STRIKETHROUGH_OFF}"
-def inverse(s: str)       -> str: return f"{ANSI.INVERSE_ON}{s}{ANSI.INVERSE_OFF}"
+def bold(s: str)          -> str: return f"{EscapeCodes.BOLD_ON}{s}{EscapeCodes.BOLD_OFF}"
+def italic(s: str)        -> str: return f"{EscapeCodes.ITALIC_ON}{s}{EscapeCodes.ITALIC_OFF}"
+def underline(s: str)     -> str: return f"{EscapeCodes.UNDERLINE_ON}{s}{EscapeCodes.UNDERLINE_OFF}"
+def strikethrough(s: str) -> str: return f"{EscapeCodes.STRIKETHROUGH_ON}{s}{EscapeCodes.STRIKETHROUGH_OFF}"
+def inverse(s: str)       -> str: return f"{EscapeCodes.INVERSE_ON}{s}{EscapeCodes.INVERSE_OFF}"
 
 
 def highlight_code(code: str, lang: str | None) -> list[str]:
