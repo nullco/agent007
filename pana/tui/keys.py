@@ -1,32 +1,26 @@
 """Keyboard input handling for terminal applications.
 
-Supports legacy terminal input, Kitty keyboard protocol, and xterm modifyOtherKeys sequences.
+Supports legacy terminal input, Kitty keyboard protocol, and xterm
+modifyOtherKeys sequences.
 See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 
 API:
-- matchesKey(data, keyId) - Check if input matches a key identifier
-- parseKey(data)          - Parse input and return the key identifier
+- matches_key(data, key_id) - Check if input matches a key identifier
+- parse_key(data)          - Parse input and return the key identifier
 - Key                     - Helper object for creating typed key identifiers
-- setEnhancedKeyboardProtocolActive - Set global enhanced keyboard protocol state
-- isEnhancedKeyboardProtocolActive  - Query global enhanced keyboard protocol state
+- set_enhanced_keyboard_protocol_active - Set global enhanced keyboard protocol state
+- is_enhanced_keyboard_protocol_active  - Query global enhanced keyboard protocol state
 """
+
 from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
+from enum import IntFlag
+from typing import Final, Literal, TypedDict
 
 _enhanced_keyboard_protocol_active = False
-
-
-def set_enhanced_keyboard_protocol_active(active: bool) -> None:
-    global _enhanced_keyboard_protocol_active
-    _enhanced_keyboard_protocol_active = active
-
-
-def is_enhanced_keyboard_protocol_active() -> bool:
-    return _enhanced_keyboard_protocol_active
-
-
 
 
 class _Key:
@@ -111,23 +105,32 @@ class _Key:
 Key = _Key()
 
 
-SYMBOL_KEYS = set("`-=[]\\;',./!@#$%^&*()_+|~{}:<>?")
+class Modifier(IntFlag):
+    """Bitmask for supported keyboard modifiers."""
 
-MODIFIERS = {"shift": 1, "alt": 2, "ctrl": 4}
-LOCK_MASK = 64 + 128  # Caps Lock + Num Lock
+    SHIFT = 1
+    ALT = 2
+    CTRL = 4
+    CAPS_LOCK = 64
+    NUM_LOCK = 128
 
-CODEPOINTS = {
+
+LOCK_MASK: Final = Modifier.CAPS_LOCK | Modifier.NUM_LOCK
+SUPPORTED_MODIFIERS: Final = Modifier.SHIFT | Modifier.ALT | Modifier.CTRL
+SYMBOL_KEYS: Final = set("`-=[]\\;',./!@#$%^&*()_+|~{}:<>?")
+
+CODEPOINTS: Final = {
     "escape": 27,
     "tab": 9,
     "enter": 13,
     "space": 32,
     "backspace": 127,
-    "kpEnter": 57414,  # Numpad Enter (Kitty protocol)
+    "kpEnter": 57414,
 }
 
-ARROW_CODEPOINTS = {"up": -1, "down": -2, "right": -3, "left": -4}
+ARROW_CODEPOINTS: Final = {"up": -1, "down": -2, "right": -3, "left": -4}
 
-FUNCTIONAL_CODEPOINTS = {
+FUNCTIONAL_CODEPOINTS: Final = {
     "delete": -10,
     "insert": -11,
     "pageUp": -12,
@@ -136,7 +139,39 @@ FUNCTIONAL_CODEPOINTS = {
     "end": -15,
 }
 
-LEGACY_KEY_SEQUENCES: dict[str, list[str]] = {
+CODEPOINT_TO_KEY_NAME: Final = {
+    CODEPOINTS["escape"]: "escape",
+    CODEPOINTS["tab"]: "tab",
+    CODEPOINTS["enter"]: "enter",
+    CODEPOINTS["kpEnter"]: "enter",
+    CODEPOINTS["space"]: "space",
+    CODEPOINTS["backspace"]: "backspace",
+    FUNCTIONAL_CODEPOINTS["delete"]: "delete",
+    FUNCTIONAL_CODEPOINTS["insert"]: "insert",
+    FUNCTIONAL_CODEPOINTS["home"]: "home",
+    FUNCTIONAL_CODEPOINTS["end"]: "end",
+    FUNCTIONAL_CODEPOINTS["pageUp"]: "pageUp",
+    FUNCTIONAL_CODEPOINTS["pageDown"]: "pageDown",
+    ARROW_CODEPOINTS["up"]: "up",
+    ARROW_CODEPOINTS["down"]: "down",
+    ARROW_CODEPOINTS["left"]: "left",
+    ARROW_CODEPOINTS["right"]: "right",
+}
+
+NAMED_KEY_CODEPOINTS: Final = {
+    **{name: codepoint for name, codepoint in CODEPOINTS.items() if name != "kpEnter"},
+    **ARROW_CODEPOINTS,
+    **FUNCTIONAL_CODEPOINTS,
+}
+
+NORMALIZED_KEY_ALIASES: Final = {
+    "esc": "escape",
+    "return": "enter",
+    "pageup": "pageUp",
+    "pagedown": "pageDown",
+}
+
+LEGACY_KEY_SEQUENCES: Final[dict[str, list[str]]] = {
     "up": ["\x1b[A", "\x1bOA"],
     "down": ["\x1b[B", "\x1bOB"],
     "right": ["\x1b[C", "\x1bOC"],
@@ -162,7 +197,7 @@ LEGACY_KEY_SEQUENCES: dict[str, list[str]] = {
     "f12": ["\x1b[24~"],
 }
 
-LEGACY_SHIFT_SEQUENCES: dict[str, list[str]] = {
+LEGACY_SHIFT_SEQUENCES: Final[dict[str, list[str]]] = {
     "up": ["\x1b[a"],
     "down": ["\x1b[b"],
     "right": ["\x1b[c"],
@@ -176,7 +211,7 @@ LEGACY_SHIFT_SEQUENCES: dict[str, list[str]] = {
     "end": ["\x1b[8$"],
 }
 
-LEGACY_CTRL_SEQUENCES: dict[str, list[str]] = {
+LEGACY_CTRL_SEQUENCES: Final[dict[str, list[str]]] = {
     "up": ["\x1bOa"],
     "down": ["\x1bOb"],
     "right": ["\x1bOc"],
@@ -190,44 +225,6 @@ LEGACY_CTRL_SEQUENCES: dict[str, list[str]] = {
     "end": ["\x1b[8^"],
 }
 
-LEGACY_SEQUENCE_KEY_IDS: dict[str, str] = {
-    "\x1bOA": "up", "\x1bOB": "down", "\x1bOC": "right", "\x1bOD": "left",
-    "\x1bOH": "home", "\x1bOF": "end",
-    "\x1b[E": "clear", "\x1bOE": "clear",
-    "\x1bOe": "ctrl+clear", "\x1b[e": "shift+clear",
-    "\x1b[2~": "insert", "\x1b[2$": "shift+insert", "\x1b[2^": "ctrl+insert",
-    "\x1b[3$": "shift+delete", "\x1b[3^": "ctrl+delete",
-    "\x1b[[5~": "pageUp", "\x1b[[6~": "pageDown",
-    "\x1b[a": "shift+up", "\x1b[b": "shift+down",
-    "\x1b[c": "shift+right", "\x1b[d": "shift+left",
-    "\x1bOa": "ctrl+up", "\x1bOb": "ctrl+down",
-    "\x1bOc": "ctrl+right", "\x1bOd": "ctrl+left",
-    "\x1b[5$": "shift+pageUp", "\x1b[6$": "shift+pageDown",
-    "\x1b[7$": "shift+home", "\x1b[8$": "shift+end",
-    "\x1b[5^": "ctrl+pageUp", "\x1b[6^": "ctrl+pageDown",
-    "\x1b[7^": "ctrl+home", "\x1b[8^": "ctrl+end",
-    "\x1bOP": "f1", "\x1bOQ": "f2", "\x1bOR": "f3", "\x1bOS": "f4",
-    "\x1b[11~": "f1", "\x1b[12~": "f2", "\x1b[13~": "f3", "\x1b[14~": "f4",
-    "\x1b[[A": "f1", "\x1b[[B": "f2", "\x1b[[C": "f3", "\x1b[[D": "f4",
-    "\x1b[[E": "f5",
-    "\x1b[15~": "f5", "\x1b[17~": "f6", "\x1b[18~": "f7", "\x1b[19~": "f8",
-    "\x1b[20~": "f9", "\x1b[21~": "f10", "\x1b[23~": "f11", "\x1b[24~": "f12",
-    "\x1bb": "alt+left", "\x1bf": "alt+right",
-    "\x1bp": "alt+up", "\x1bn": "alt+down",
-}
-
-
-
-def _is_windows_terminal_session() -> bool:
-    """Return True when running inside Windows Terminal (not over SSH)."""
-    return (
-        bool(os.environ.get("WT_SESSION"))
-        and not os.environ.get("SSH_CONNECTION")
-        and not os.environ.get("SSH_CLIENT")
-        and not os.environ.get("SSH_TTY")
-    )
-
-
 
 _CSI_U_RE = re.compile(
     r"^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$"
@@ -238,229 +235,458 @@ _HOME_END_MOD_RE = re.compile(r"^\x1b\[1;(\d+)(?::(\d+))?([HF])$")
 _MODIFY_OTHER_RE = re.compile(r"^\x1b\[27;(\d+);(\d+)~$")
 
 
-def _parse_event_type(s: str | None) -> str:
-    if not s:
+EventType = Literal["press", "repeat", "release"]
+
+
+class KittySequenceDict(TypedDict):
+    codepoint: int
+    shifted_key: int | None
+    base_layout_key: int | None
+    modifier: int
+    event_type: EventType
+
+
+class ModifyOtherKeysDict(TypedDict):
+    codepoint: int
+    modifier: int
+
+
+@dataclass(frozen=True)
+class KeySpec:
+    key: str
+    modifiers: Modifier
+
+
+@dataclass(frozen=True)
+class ProtocolEvent:
+    codepoint: int
+    modifiers: Modifier
+    event_type: EventType
+    shifted_key: int | None = None
+    base_layout_key: int | None = None
+
+
+def set_enhanced_keyboard_protocol_active(active: bool) -> None:
+    global _enhanced_keyboard_protocol_active
+    _enhanced_keyboard_protocol_active = active
+
+
+
+def is_enhanced_keyboard_protocol_active() -> bool:
+    return _enhanced_keyboard_protocol_active
+
+
+
+def _normalize_key_name(key: str) -> str:
+    return NORMALIZED_KEY_ALIASES.get(key.lower(), key.lower())
+
+
+
+def _modifiers_to_key_id_prefix(modifiers: Modifier) -> str | None:
+    effective = modifiers & ~LOCK_MASK
+    if effective & ~SUPPORTED_MODIFIERS:
+        return None
+
+    parts: list[str] = []
+    if effective & Modifier.SHIFT:
+        parts.append("shift")
+    if effective & Modifier.CTRL:
+        parts.append("ctrl")
+    if effective & Modifier.ALT:
+        parts.append("alt")
+    return "+".join(parts)
+
+
+
+def _format_key_id(key: str, modifiers: Modifier) -> str | None:
+    prefix = _modifiers_to_key_id_prefix(modifiers)
+    if prefix is None:
+        return None
+    return f"{prefix}+{key}" if prefix else key
+
+
+
+def _build_legacy_sequence_key_ids() -> dict[str, str]:
+    sequence_key_ids: dict[str, str] = {}
+
+    for key_name, sequences in LEGACY_KEY_SEQUENCES.items():
+        for sequence in sequences:
+            sequence_key_ids[sequence] = key_name
+
+    for key_name, sequences in LEGACY_SHIFT_SEQUENCES.items():
+        key_id = _format_key_id(key_name, Modifier.SHIFT)
+        if key_id is None:
+            continue
+        for sequence in sequences:
+            sequence_key_ids[sequence] = key_id
+
+    for key_name, sequences in LEGACY_CTRL_SEQUENCES.items():
+        key_id = _format_key_id(key_name, Modifier.CTRL)
+        if key_id is None:
+            continue
+        for sequence in sequences:
+            sequence_key_ids[sequence] = key_id
+
+    sequence_key_ids.update(
+        {
+            "\x1bb": "alt+left",
+            "\x1bf": "alt+right",
+            "\x1bp": "alt+up",
+            "\x1bn": "alt+down",
+        }
+    )
+    return sequence_key_ids
+
+
+LEGACY_SEQUENCE_KEY_IDS: Final = _build_legacy_sequence_key_ids()
+
+_SPECIAL_LEGACY_KEY_IDS: Final = {
+    "\x1b": "escape",
+    "\x1c": "ctrl+\\",
+    "\x1d": "ctrl+]",
+    "\x1f": "ctrl+-",
+    "\x1b\x1b": "ctrl+alt+[",
+    "\x1b\x1c": "ctrl+alt+\\",
+    "\x1b\x1d": "ctrl+alt+]",
+    "\x1b\x1f": "ctrl+alt+-",
+    "\t": "tab",
+    "\x00": "ctrl+space",
+    " ": "space",
+    "\x7f": "backspace",
+    "\x1b[Z": "shift+tab",
+}
+
+
+
+def _is_windows_terminal_session() -> bool:
+    """Return True when running inside Windows Terminal, but not over SSH."""
+    return (
+        bool(os.environ.get("WT_SESSION"))
+        and not os.environ.get("SSH_CONNECTION")
+        and not os.environ.get("SSH_CLIENT")
+        and not os.environ.get("SSH_TTY")
+    )
+
+
+
+def _parse_event_type(value: str | None) -> EventType:
+    if not value:
         return "press"
-    v = int(s)
-    if v == 2:
+    parsed_value = int(value)
+    if parsed_value == 2:
         return "repeat"
-    if v == 3:
+    if parsed_value == 3:
         return "release"
     return "press"
 
 
-def parse_kitty_sequence(data: str) -> dict | None:
-    m = _CSI_U_RE.match(data)
-    if m:
-        cp = int(m.group(1))
-        shifted = int(m.group(2)) if m.group(2) and len(m.group(2)) > 0 else None
-        base = int(m.group(3)) if m.group(3) else None
-        mod_val = int(m.group(4)) if m.group(4) else 1
-        evt = _parse_event_type(m.group(5))
-        return {
-            "codepoint": cp, "shifted_key": shifted, "base_layout_key": base,
-            "modifier": mod_val - 1, "event_type": evt,
-        }
 
-    m = _ARROW_MOD_RE.match(data)
-    if m:
-        mod_val = int(m.group(1))
-        evt = _parse_event_type(m.group(2))
-        arrow_map = {"A": -1, "B": -2, "C": -3, "D": -4}
-        return {
-            "codepoint": arrow_map[m.group(3)], "shifted_key": None,
-            "base_layout_key": None, "modifier": mod_val - 1, "event_type": evt,
-        }
+def _parse_kitty_event(data: str) -> ProtocolEvent | None:
+    match = _CSI_U_RE.match(data)
+    if match:
+        shifted_key = (
+            int(match.group(2)) if match.group(2) and len(match.group(2)) > 0 else None
+        )
+        base_layout_key = int(match.group(3)) if match.group(3) else None
+        modifier_value = int(match.group(4)) if match.group(4) else 1
+        return ProtocolEvent(
+            codepoint=int(match.group(1)),
+            shifted_key=shifted_key,
+            base_layout_key=base_layout_key,
+            modifiers=Modifier(max(modifier_value - 1, 0)),
+            event_type=_parse_event_type(match.group(5)),
+        )
 
-    m = _FUNC_MOD_RE.match(data)
-    if m:
-        key_num = int(m.group(1))
-        mod_val = int(m.group(2)) if m.group(2) else 1
-        evt = _parse_event_type(m.group(3))
-        func_map = {
-            2: FUNCTIONAL_CODEPOINTS["insert"], 3: FUNCTIONAL_CODEPOINTS["delete"],
-            5: FUNCTIONAL_CODEPOINTS["pageUp"], 6: FUNCTIONAL_CODEPOINTS["pageDown"],
-            7: FUNCTIONAL_CODEPOINTS["home"], 8: FUNCTIONAL_CODEPOINTS["end"],
+    match = _ARROW_MOD_RE.match(data)
+    if match:
+        arrow_map = {
+            "A": ARROW_CODEPOINTS["up"],
+            "B": ARROW_CODEPOINTS["down"],
+            "C": ARROW_CODEPOINTS["right"],
+            "D": ARROW_CODEPOINTS["left"],
         }
-        cp = func_map.get(key_num)
-        if cp is not None:
-            return {
-                "codepoint": cp, "shifted_key": None, "base_layout_key": None,
-                "modifier": mod_val - 1, "event_type": evt,
-            }
+        modifier_value = int(match.group(1))
+        return ProtocolEvent(
+            codepoint=arrow_map[match.group(3)],
+            modifiers=Modifier(max(modifier_value - 1, 0)),
+            event_type=_parse_event_type(match.group(2)),
+        )
 
-    m = _HOME_END_MOD_RE.match(data)
-    if m:
-        mod_val = int(m.group(1))
-        evt = _parse_event_type(m.group(2))
-        cp = FUNCTIONAL_CODEPOINTS["home"] if m.group(3) == "H" else FUNCTIONAL_CODEPOINTS["end"]
-        return {
-            "codepoint": cp, "shifted_key": None, "base_layout_key": None,
-            "modifier": mod_val - 1, "event_type": evt,
+    match = _FUNC_MOD_RE.match(data)
+    if match:
+        functional_map = {
+            2: FUNCTIONAL_CODEPOINTS["insert"],
+            3: FUNCTIONAL_CODEPOINTS["delete"],
+            5: FUNCTIONAL_CODEPOINTS["pageUp"],
+            6: FUNCTIONAL_CODEPOINTS["pageDown"],
+            7: FUNCTIONAL_CODEPOINTS["home"],
+            8: FUNCTIONAL_CODEPOINTS["end"],
         }
+        codepoint = functional_map.get(int(match.group(1)))
+        if codepoint is None:
+            return None
+        modifier_value = int(match.group(2)) if match.group(2) else 1
+        return ProtocolEvent(
+            codepoint=codepoint,
+            modifiers=Modifier(max(modifier_value - 1, 0)),
+            event_type=_parse_event_type(match.group(3)),
+        )
+
+    match = _HOME_END_MOD_RE.match(data)
+    if match:
+        key_name = "home" if match.group(3) == "H" else "end"
+        modifier_value = int(match.group(1))
+        return ProtocolEvent(
+            codepoint=FUNCTIONAL_CODEPOINTS[key_name],
+            modifiers=Modifier(max(modifier_value - 1, 0)),
+            event_type=_parse_event_type(match.group(2)),
+        )
 
     return None
 
 
-def _matches_kitty(data: str, expected_cp: int, expected_mod: int) -> bool:
-    parsed = parse_kitty_sequence(data)
-    if not parsed:
-        return False
-    actual_mod = parsed["modifier"] & ~LOCK_MASK
-    exp_mod = expected_mod & ~LOCK_MASK
-    if actual_mod != exp_mod:
-        return False
-    if parsed["codepoint"] == expected_cp:
-        return True
-    # Base layout key fallback (non-Latin keyboards)
-    blk = parsed.get("base_layout_key")
-    if blk is not None and blk == expected_cp:
-        cp = parsed["codepoint"]
-        is_latin = 97 <= cp <= 122
-        is_symbol = chr(cp) in SYMBOL_KEYS if 0 <= cp <= 0x10FFFF else False
-        if not is_latin and not is_symbol:
-            return True
-    return False
 
-
-def _parse_xterm_modify_other_keys(data: str) -> dict | None:
-    m = _MODIFY_OTHER_RE.match(data)
-    if not m:
+def parse_kitty_sequence(data: str) -> KittySequenceDict | None:
+    event = _parse_kitty_event(data)
+    if event is None:
         return None
-    return {"codepoint": int(m.group(2)), "modifier": int(m.group(1)) - 1}
+    return {
+        "codepoint": event.codepoint,
+        "shifted_key": event.shifted_key,
+        "base_layout_key": event.base_layout_key,
+        "modifier": int(event.modifiers),
+        "event_type": event.event_type,
+    }
 
 
-def _matches_xterm_modify_other_keys(data: str, keycode: int, modifier: int) -> bool:
-    parsed = _parse_xterm_modify_other_keys(data)
-    if not parsed:
+
+def _parse_xterm_modify_other_keys_event(data: str) -> ProtocolEvent | None:
+    match = _MODIFY_OTHER_RE.match(data)
+    if not match:
+        return None
+    return ProtocolEvent(
+        codepoint=int(match.group(2)),
+        modifiers=Modifier(max(int(match.group(1)) - 1, 0)),
+        event_type="press",
+    )
+
+
+
+def _parse_xterm_modify_other_keys(data: str) -> ModifyOtherKeysDict | None:
+    event = _parse_xterm_modify_other_keys_event(data)
+    if event is None:
+        return None
+    return {"codepoint": event.codepoint, "modifier": int(event.modifiers)}
+
+
+
+def _is_latin_lower(codepoint: int) -> bool:
+    return 97 <= codepoint <= 122
+
+
+
+def _is_ascii_digit(codepoint: int) -> bool:
+    return 48 <= codepoint <= 57
+
+
+
+def _is_symbol_codepoint(codepoint: int) -> bool:
+    return 0 <= codepoint <= 0x10FFFF and chr(codepoint) in SYMBOL_KEYS
+
+
+
+def _effective_codepoint_for_key_name(
+    codepoint: int,
+    base_layout_key: int | None,
+) -> int:
+    if _is_latin_lower(codepoint) or _is_ascii_digit(codepoint) or _is_symbol_codepoint(codepoint):
+        return codepoint
+    if base_layout_key is not None:
+        return base_layout_key
+    return codepoint
+
+
+
+def _key_name_from_codepoint(
+    codepoint: int,
+    base_layout_key: int | None = None,
+) -> str | None:
+    effective_codepoint = _effective_codepoint_for_key_name(codepoint, base_layout_key)
+    key_name = CODEPOINT_TO_KEY_NAME.get(effective_codepoint)
+    if key_name is not None:
+        return key_name
+    if _is_ascii_digit(effective_codepoint) or _is_latin_lower(effective_codepoint):
+        return chr(effective_codepoint)
+    if _is_symbol_codepoint(effective_codepoint):
+        return chr(effective_codepoint)
+    return None
+
+
+
+def _format_protocol_key_id(event: ProtocolEvent) -> str | None:
+    key_name = _key_name_from_codepoint(event.codepoint, event.base_layout_key)
+    if key_name is None:
+        return None
+    return _format_key_id(key_name, event.modifiers)
+
+
+
+def _parse_key_spec(key_id: str) -> KeySpec | None:
+    parts = [part for part in key_id.lower().split("+") if part]
+    if not parts:
+        return None
+
+    key_name = _normalize_key_name(parts[-1])
+    modifiers = Modifier(0)
+    for modifier_name in parts[:-1]:
+        if modifier_name == "shift":
+            modifiers |= Modifier.SHIFT
+            continue
+        if modifier_name == "alt":
+            modifiers |= Modifier.ALT
+            continue
+        if modifier_name == "ctrl":
+            modifiers |= Modifier.CTRL
+            continue
+        return None
+    return KeySpec(key=key_name, modifiers=modifiers)
+
+
+
+def _key_specs_equal(left: KeySpec, right: KeySpec) -> bool:
+    return left.key == right.key and left.modifiers == right.modifiers
+
+
+
+def _parse_legacy_named_key_id(data: str) -> str | None:
+    if _enhanced_keyboard_protocol_active and data in ("\x1b\r", "\n"):
+        return "shift+enter"
+
+    if data in _SPECIAL_LEGACY_KEY_IDS:
+        return _SPECIAL_LEGACY_KEY_IDS[data]
+
+    if data == "\r" or (
+        not _enhanced_keyboard_protocol_active and data == "\n"
+    ) or data == "\x1bOM":
+        return "enter"
+
+    if not _enhanced_keyboard_protocol_active and data == "\x1b\r":
+        return "alt+enter"
+
+    if not _enhanced_keyboard_protocol_active and data == "\x1b ":
+        return "alt+space"
+
+    if data in ("\x1b\x7f", "\x1b\x08"):
+        return "alt+backspace"
+
+    if data == "\x08":
+        return "ctrl+backspace" if _is_windows_terminal_session() else "backspace"
+
+    if not _enhanced_keyboard_protocol_active and data == "\x1bB":
+        return "alt+left"
+
+    if not _enhanced_keyboard_protocol_active and data == "\x1bF":
+        return "alt+right"
+
+    return LEGACY_SEQUENCE_KEY_IDS.get(data)
+
+
+
+def _parse_raw_printable_key_id(data: str) -> str | None:
+    if not _enhanced_keyboard_protocol_active and len(data) == 2 and data[0] == "\x1b":
+        codepoint = ord(data[1])
+        if 1 <= codepoint <= 26:
+            return f"ctrl+alt+{chr(codepoint + 96)}"
+        if _is_latin_lower(codepoint) or _is_ascii_digit(codepoint):
+            return f"alt+{chr(codepoint)}"
+
+    if len(data) != 1:
+        return None
+
+    codepoint = ord(data)
+    if 1 <= codepoint <= 26:
+        return f"ctrl+{chr(codepoint + 96)}"
+    if 32 <= codepoint <= 126:
+        return data
+    return None
+
+
+
+def _raw_ctrl_char(key_name: str) -> str | None:
+    lower_key_name = key_name.lower()
+    codepoint = ord(lower_key_name)
+    if _is_latin_lower(codepoint) or lower_key_name in ("[", "\\", "]", "_"):
+        return chr(codepoint & 0x1F)
+    if lower_key_name == "-":
+        return chr(31)
+    return None
+
+
+
+def _match_protocol_event(event: ProtocolEvent, key_spec: KeySpec) -> bool:
+    protocol_key_id = _format_protocol_key_id(event)
+    if protocol_key_id is None:
         return False
-    return parsed["codepoint"] == keycode and parsed["modifier"] == modifier
+    protocol_key_spec = _parse_key_spec(protocol_key_id)
+    return protocol_key_spec is not None and _key_specs_equal(protocol_key_spec, key_spec)
 
 
-def _matches_printable_xterm_modify_other_keys(data: str, keycode: int, modifier: int) -> bool:
-    """Match modifyOtherKeys only when modifier != 0 (printable key context)."""
-    if modifier == 0:
+
+def _matches_raw_printable(data: str, key_spec: KeySpec) -> bool:
+    key_name = key_spec.key
+    modifiers = key_spec.modifiers
+
+    if len(key_name) != 1 or not (
+        ("a" <= key_name <= "z") or ("0" <= key_name <= "9") or key_name in SYMBOL_KEYS
+    ):
         return False
-    return _matches_xterm_modify_other_keys(data, keycode, modifier)
 
+    raw_ctrl_character = _raw_ctrl_char(key_name)
+    is_letter = "a" <= key_name <= "z"
+    is_letter_or_digit = is_letter or ("0" <= key_name <= "9")
+
+    if (
+        modifiers == Modifier.CTRL | Modifier.ALT
+        and not _enhanced_keyboard_protocol_active
+        and raw_ctrl_character is not None
+    ):
+        return data == f"\x1b{raw_ctrl_character}"
+
+    if (
+        modifiers == Modifier.ALT
+        and not _enhanced_keyboard_protocol_active
+        and is_letter_or_digit
+    ):
+        return data == f"\x1b{key_name}"
+
+    if modifiers == Modifier.CTRL:
+        return raw_ctrl_character is not None and data == raw_ctrl_character
+
+    if modifiers == Modifier.SHIFT:
+        return is_letter and data == key_name.upper()
+
+    if modifiers == Modifier(0):
+        return data == key_name
+
+    return False
 
 
 
 def is_key_release(data: str) -> bool:
     """Return True if *data* is a Kitty key-release event."""
-    # Bracketed paste content may contain patterns like ":3F" — don't misidentify.
     if "\x1b[200~" in data:
         return False
-    for suffix in (":3u", ":3~", ":3A", ":3B", ":3C", ":3D", ":3H", ":3F"):
-        if suffix in data:
-            return True
-    return False
+    event = _parse_kitty_event(data)
+    return event is not None and event.event_type == "release"
+
 
 
 def is_key_repeat(data: str) -> bool:
     """Return True if *data* is a Kitty key-repeat event."""
     if "\x1b[200~" in data:
         return False
-    for suffix in (":2u", ":2~", ":2A", ":2B", ":2C", ":2D", ":2H", ":2F"):
-        if suffix in data:
-            return True
-    return False
-
-
-
-
-def _matches_raw_backspace(data: str, expected_modifier: int) -> bool:
-    """Handle 0x7f / 0x08 backspace ambiguity.
-
-    0x7f  → always plain backspace (modifier == 0).
-    0x08  → Windows Terminal: ctrl+backspace; elsewhere: plain backspace.
-    """
-    if data == "\x7f":
-        return expected_modifier == 0
-    if data != "\x08":
-        return False
-    if _is_windows_terminal_session():
-        return expected_modifier == MODIFIERS["ctrl"]
-    return expected_modifier == 0
-
-
-
-
-def _raw_ctrl_char(key: str) -> str | None:
-    ch = key.lower()
-    code = ord(ch)
-    if (97 <= code <= 122) or ch in ("[", "\\", "]", "_"):
-        return chr(code & 0x1F)
-    if ch == "-":
-        return chr(31)
-    return None
-
-
-def _parse_key_id(key_id: str) -> tuple[str, bool, bool, bool] | None:
-    parts = key_id.lower().split("+")
-    key = parts[-1] if parts else None
-    if not key:
-        return None
-    return (key, "ctrl" in parts, "shift" in parts, "alt" in parts)
-
-
-def _matches_legacy_seq(data: str, sequences: list[str]) -> bool:
-    return data in sequences
-
-
-def _matches_legacy_mod_seq(data: str, key: str, modifier: int) -> bool:
-    if modifier == MODIFIERS["shift"]:
-        seqs = LEGACY_SHIFT_SEQUENCES.get(key)
-        return data in seqs if seqs else False
-    if modifier == MODIFIERS["ctrl"]:
-        seqs = LEGACY_CTRL_SEQUENCES.get(key)
-        return data in seqs if seqs else False
-    return False
-
-
-def _format_key_with_mods(key_name: str, modifier: int) -> str | None:
-    eff = modifier & ~LOCK_MASK
-    supported = MODIFIERS["shift"] | MODIFIERS["ctrl"] | MODIFIERS["alt"]
-    if eff & ~supported:
-        return None
-    mods: list[str] = []
-    if eff & MODIFIERS["shift"]:
-        mods.append("shift")
-    if eff & MODIFIERS["ctrl"]:
-        mods.append("ctrl")
-    if eff & MODIFIERS["alt"]:
-        mods.append("alt")
-    return f"{'+'.join(mods)}+{key_name}" if mods else key_name
-
-
-def _format_parsed_key(cp: int, modifier: int, base_layout_key: int | None = None) -> str | None:
-    is_latin = 97 <= cp <= 122
-    is_digit = 48 <= cp <= 57
-    is_symbol = chr(cp) in SYMBOL_KEYS if 0 <= cp <= 0x10FFFF else False
-    eff_cp = cp if (is_latin or is_digit or is_symbol) else (base_layout_key if base_layout_key is not None else cp)
-
-    _map: dict[int, str] = {
-        CODEPOINTS["escape"]: "escape", CODEPOINTS["tab"]: "tab",
-        CODEPOINTS["enter"]: "enter", CODEPOINTS["kpEnter"]: "enter",
-        CODEPOINTS["space"]: "space", CODEPOINTS["backspace"]: "backspace",
-        FUNCTIONAL_CODEPOINTS["delete"]: "delete",
-        FUNCTIONAL_CODEPOINTS["insert"]: "insert",
-        FUNCTIONAL_CODEPOINTS["home"]: "home", FUNCTIONAL_CODEPOINTS["end"]: "end",
-        FUNCTIONAL_CODEPOINTS["pageUp"]: "pageUp",
-        FUNCTIONAL_CODEPOINTS["pageDown"]: "pageDown",
-        ARROW_CODEPOINTS["up"]: "up", ARROW_CODEPOINTS["down"]: "down",
-        ARROW_CODEPOINTS["left"]: "left", ARROW_CODEPOINTS["right"]: "right",
-    }
-    key_name = _map.get(eff_cp)
-    if key_name is None:
-        if 48 <= eff_cp <= 57 or 97 <= eff_cp <= 122:
-            key_name = chr(eff_cp)
-        elif chr(eff_cp) in SYMBOL_KEYS if 0 <= eff_cp <= 0x10FFFF else False:
-            key_name = chr(eff_cp)
-    if key_name is None:
-        return None
-    return _format_key_with_mods(key_name, modifier)
-
+    event = _parse_kitty_event(data)
+    return event is not None and event.event_type == "repeat"
 
 
 
@@ -469,377 +695,68 @@ def matches_key(data: str, key_id: str) -> bool:
 
     Examples: ``matches_key(data, "ctrl+c")``, ``matches_key(data, "shift+enter")``.
     """
-    parsed = _parse_key_id(key_id)
-    if not parsed:
+    key_spec = _parse_key_spec(key_id)
+    if key_spec is None:
         return False
-    key, ctrl, shift, alt = parsed
 
-    modifier = 0
-    if shift:
-        modifier |= MODIFIERS["shift"]
-    if alt:
-        modifier |= MODIFIERS["alt"]
-    if ctrl:
-        modifier |= MODIFIERS["ctrl"]
+    kitty_event = _parse_kitty_event(data)
+    if kitty_event is not None:
+        return _match_protocol_event(kitty_event, key_spec)
 
-    # --- Special keys ---
-
-    if key in ("escape", "esc"):
-        if modifier != 0:
+    xterm_event = _parse_xterm_modify_other_keys_event(data)
+    if xterm_event is not None:
+        if len(key_spec.key) == 1 and key_spec.modifiers == Modifier(0):
             return False
-        return (
-            data == "\x1b"
-            or _matches_kitty(data, CODEPOINTS["escape"], 0)
-            or _matches_xterm_modify_other_keys(data, CODEPOINTS["escape"], 0)
-        )
+        return _match_protocol_event(xterm_event, key_spec)
 
-    if key == "space":
-        if not _enhanced_keyboard_protocol_active:
-            if ctrl and not alt and not shift and data == "\x00":
-                return True
-            if alt and not ctrl and not shift and data == "\x1b ":
-                return True
-        if modifier == 0:
-            return (
-                data == " "
-                or _matches_kitty(data, CODEPOINTS["space"], 0)
-                or _matches_xterm_modify_other_keys(data, CODEPOINTS["space"], 0)
-            )
-        return (
-            _matches_kitty(data, CODEPOINTS["space"], modifier)
-            or _matches_xterm_modify_other_keys(data, CODEPOINTS["space"], modifier)
-        )
+    legacy_key_id = _parse_legacy_named_key_id(data)
+    if legacy_key_id is not None:
+        legacy_key_spec = _parse_key_spec(legacy_key_id)
+        return legacy_key_spec is not None and _key_specs_equal(legacy_key_spec, key_spec)
 
-    if key == "tab":
-        if shift and not ctrl and not alt:
-            return (
-                data == "\x1b[Z"
-                or _matches_kitty(data, CODEPOINTS["tab"], MODIFIERS["shift"])
-                or _matches_xterm_modify_other_keys(data, CODEPOINTS["tab"], MODIFIERS["shift"])
-            )
-        if modifier == 0:
-            return data == "\t" or _matches_kitty(data, CODEPOINTS["tab"], 0)
-        return (
-            _matches_kitty(data, CODEPOINTS["tab"], modifier)
-            or _matches_xterm_modify_other_keys(data, CODEPOINTS["tab"], modifier)
-        )
-
-    if key in ("enter", "return"):
-        if shift and not ctrl and not alt:
-            if (
-                _matches_kitty(data, CODEPOINTS["enter"], MODIFIERS["shift"])
-                or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["shift"])
-            ):
-                return True
-            if _matches_xterm_modify_other_keys(data, CODEPOINTS["enter"], MODIFIERS["shift"]):
-                return True
-            if _enhanced_keyboard_protocol_active:
-                return data == "\x1b\r" or data == "\n"
-            return False
-        if alt and not ctrl and not shift:
-            if (
-                _matches_kitty(data, CODEPOINTS["enter"], MODIFIERS["alt"])
-                or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["alt"])
-            ):
-                return True
-            if _matches_xterm_modify_other_keys(data, CODEPOINTS["enter"], MODIFIERS["alt"]):
-                return True
-            if not _enhanced_keyboard_protocol_active:
-                return data == "\x1b\r"
-            return False
-        if modifier == 0:
-            return (
-                data == "\r"
-                or (not _enhanced_keyboard_protocol_active and data == "\n")
-                or data == "\x1bOM"
-                or _matches_kitty(data, CODEPOINTS["enter"], 0)
-                or _matches_kitty(data, CODEPOINTS["kpEnter"], 0)
-            )
-        return (
-            _matches_kitty(data, CODEPOINTS["enter"], modifier)
-            or _matches_kitty(data, CODEPOINTS["kpEnter"], modifier)
-            or _matches_xterm_modify_other_keys(data, CODEPOINTS["enter"], modifier)
-        )
-
-    if key == "backspace":
-        if alt and not ctrl and not shift:
-            if data in ("\x1b\x7f", "\x1b\x08"):
-                return True
-            return (
-                _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
-                or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
-            )
-        if ctrl and not alt and not shift:
-            # 0x08 is ambiguous: Ctrl+Backspace on Windows Terminal, plain Backspace elsewhere
-            if _matches_raw_backspace(data, MODIFIERS["ctrl"]):
-                return True
-            return (
-                _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
-                or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
-            )
-        if modifier == 0:
-            return (
-                _matches_raw_backspace(data, 0)
-                or _matches_kitty(data, CODEPOINTS["backspace"], 0)
-                or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], 0)
-            )
-        return (
-            _matches_kitty(data, CODEPOINTS["backspace"], modifier)
-            or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], modifier)
-        )
-
-    # Functional keys
-    _func_key_map = {
-        "insert": "insert", "delete": "delete",
-        "home": "home", "end": "end",
-        "pageup": "pageUp", "pagedown": "pageDown",
-    }
-    if key in _func_key_map:
-        canon = _func_key_map[key]
-        cp = FUNCTIONAL_CODEPOINTS[canon]
-        if modifier == 0:
-            seqs = LEGACY_KEY_SEQUENCES.get(canon)
-            if seqs and _matches_legacy_seq(data, seqs):
-                return True
-            return _matches_kitty(data, cp, 0)
-        if _matches_legacy_mod_seq(data, canon, modifier):
-            return True
-        return _matches_kitty(data, cp, modifier)
-
-    if key == "clear":
-        if modifier == 0:
-            return _matches_legacy_seq(data, LEGACY_KEY_SEQUENCES["clear"])
-        return _matches_legacy_mod_seq(data, "clear", modifier)
-
-    # Arrow keys
-    _arrow_map = {"up": "up", "down": "down", "left": "left", "right": "right"}
-    if key in _arrow_map:
-        canon = _arrow_map[key]
-        cp = ARROW_CODEPOINTS[canon]
-
-        if alt and not ctrl and not shift:
-            if key == "up":
-                return data == "\x1bp" or _matches_kitty(data, cp, MODIFIERS["alt"])
-            if key == "down":
-                return data == "\x1bn" or _matches_kitty(data, cp, MODIFIERS["alt"])
-            if key == "left":
-                if data in ("\x1b[1;3D", "\x1bb"):
-                    return True
-                if not _enhanced_keyboard_protocol_active and data == "\x1bB":
-                    return True
-                return _matches_kitty(data, cp, MODIFIERS["alt"])
-            if key == "right":
-                if data in ("\x1b[1;3C", "\x1bf"):
-                    return True
-                if not _enhanced_keyboard_protocol_active and data == "\x1bF":
-                    return True
-                return _matches_kitty(data, cp, MODIFIERS["alt"])
-
-        if ctrl and not alt and not shift:
-            if key == "left":
-                if data == "\x1b[1;5D":
-                    return True
-                if _matches_legacy_mod_seq(data, canon, MODIFIERS["ctrl"]):
-                    return True
-            if key == "right":
-                if data == "\x1b[1;5C":
-                    return True
-                if _matches_legacy_mod_seq(data, canon, MODIFIERS["ctrl"]):
-                    return True
-            return _matches_kitty(data, cp, MODIFIERS["ctrl"])
-
-        if modifier == 0:
-            seqs = LEGACY_KEY_SEQUENCES.get(canon)
-            if seqs and _matches_legacy_seq(data, seqs):
-                return True
-            return _matches_kitty(data, cp, 0)
-
-        if _matches_legacy_mod_seq(data, canon, modifier):
-            return True
-        return _matches_kitty(data, cp, modifier)
-
-    # Function keys f1-f12
-    if re.match(r"^f([1-9]|1[0-2])$", key):
-        if modifier != 0:
-            return False
-        seqs = LEGACY_KEY_SEQUENCES.get(key)
-        return _matches_legacy_seq(data, seqs) if seqs else False
-
-    # --- Letters, digits, symbols ---
-    if len(key) == 1 and (
-        ("a" <= key <= "z") or ("0" <= key <= "9") or key in SYMBOL_KEYS
-    ):
-        codepoint = ord(key)
-        raw_ctrl = _raw_ctrl_char(key)
-        is_letter = "a" <= key <= "z"
-        is_digit = "0" <= key <= "9"
-
-        if ctrl and alt and not shift and not _enhanced_keyboard_protocol_active and raw_ctrl:
-            return data == f"\x1b{raw_ctrl}"
-
-        if alt and not ctrl and not shift and not _enhanced_keyboard_protocol_active and (is_letter or is_digit):
-            if data == f"\x1b{key}":
-                return True
-
-        if ctrl and not shift and not alt:
-            if raw_ctrl and data == raw_ctrl:
-                return True
-            return (
-                _matches_kitty(data, codepoint, MODIFIERS["ctrl"])
-                or _matches_printable_xterm_modify_other_keys(data, codepoint, MODIFIERS["ctrl"])
-            )
-
-        if ctrl and shift and not alt:
-            mod = MODIFIERS["shift"] + MODIFIERS["ctrl"]
-            return (
-                _matches_kitty(data, codepoint, mod)
-                or _matches_printable_xterm_modify_other_keys(data, codepoint, mod)
-            )
-
-        if shift and not ctrl and not alt:
-            if is_letter and data == key.upper():
-                return True
-            return (
-                _matches_kitty(data, codepoint, MODIFIERS["shift"])
-                or _matches_printable_xterm_modify_other_keys(data, codepoint, MODIFIERS["shift"])
-            )
-
-        if modifier != 0:
-            return (
-                _matches_kitty(data, codepoint, modifier)
-                or _matches_printable_xterm_modify_other_keys(data, codepoint, modifier)
-            )
-
-        return data == key or _matches_kitty(data, codepoint, 0)
-
-    return False
-
+    return _matches_raw_printable(data, key_spec)
 
 
 
 def parse_key(data: str) -> str | None:
     """Parse raw input and return a key identifier string, or None."""
-    kitty = parse_kitty_sequence(data)
-    if kitty:
-        return _format_parsed_key(
-            kitty["codepoint"], kitty["modifier"], kitty.get("base_layout_key")
-        )
+    kitty_event = _parse_kitty_event(data)
+    if kitty_event is not None:
+        return _format_protocol_key_id(kitty_event)
 
-    mok = _parse_xterm_modify_other_keys(data)
-    if mok:
-        return _format_parsed_key(mok["codepoint"], mok["modifier"])
+    xterm_event = _parse_xterm_modify_other_keys_event(data)
+    if xterm_event is not None:
+        return _format_protocol_key_id(xterm_event)
 
-    # Mode-aware sequences
-    if _enhanced_keyboard_protocol_active:
-        if data in ("\x1b\r", "\n"):
-            return "shift+enter"
+    legacy_key_id = _parse_legacy_named_key_id(data)
+    if legacy_key_id is not None:
+        return legacy_key_id
 
-    legacy = LEGACY_SEQUENCE_KEY_IDS.get(data)
-    if legacy:
-        return legacy
-
-    if data == "\x1b":
-        return "escape"
-    if data == "\x1c":
-        return "ctrl+\\"
-    if data == "\x1d":
-        return "ctrl+]"
-    if data == "\x1f":
-        return "ctrl+-"
-    if data == "\x1b\x1b":
-        return "ctrl+alt+["
-    if data == "\x1b\x1c":
-        return "ctrl+alt+\\"
-    if data == "\x1b\x1d":
-        return "ctrl+alt+]"
-    if data == "\x1b\x1f":
-        return "ctrl+alt+-"
-    if data == "\t":
-        return "tab"
-    if data == "\r" or (not _enhanced_keyboard_protocol_active and data == "\n") or data == "\x1bOM":
-        return "enter"
-    if data == "\x00":
-        return "ctrl+space"
-    if data == " ":
-        return "space"
-    if data == "\x7f":
-        return "backspace"
-    if data == "\x08":
-        return "ctrl+backspace" if _is_windows_terminal_session() else "backspace"
-    if data == "\x1b[Z":
-        return "shift+tab"
-    if not _enhanced_keyboard_protocol_active and data == "\x1b\r":
-        return "alt+enter"
-    if not _enhanced_keyboard_protocol_active and data == "\x1b ":
-        return "alt+space"
-    if data in ("\x1b\x7f", "\x1b\x08"):
-        return "alt+backspace"
-    if not _enhanced_keyboard_protocol_active and data == "\x1bB":
-        return "alt+left"
-    if not _enhanced_keyboard_protocol_active and data == "\x1bF":
-        return "alt+right"
-
-    if not _enhanced_keyboard_protocol_active and len(data) == 2 and data[0] == "\x1b":
-        code = ord(data[1])
-        if 1 <= code <= 26:
-            return f"ctrl+alt+{chr(code + 96)}"
-        if (97 <= code <= 122) or (48 <= code <= 57):
-            return f"alt+{chr(code)}"
-
-    if data == "\x1b[A":
-        return "up"
-    if data == "\x1b[B":
-        return "down"
-    if data == "\x1b[C":
-        return "right"
-    if data == "\x1b[D":
-        return "left"
-    if data in ("\x1b[H", "\x1bOH"):
-        return "home"
-    if data in ("\x1b[F", "\x1bOF"):
-        return "end"
-    if data == "\x1b[3~":
-        return "delete"
-    if data == "\x1b[5~":
-        return "pageUp"
-    if data == "\x1b[6~":
-        return "pageDown"
-
-    if len(data) == 1:
-        code = ord(data)
-        if 1 <= code <= 26:
-            return f"ctrl+{chr(code + 96)}"
-        if 32 <= code <= 126:
-            return data
-
-    return None
+    return _parse_raw_printable_key_id(data)
 
 
+_KITTY_PRINTABLE_ALLOWED: Final = Modifier.SHIFT | LOCK_MASK
 
-_KITTY_PRINTABLE_ALLOWED = MODIFIERS["shift"] | LOCK_MASK
 
 
 def decode_kitty_printable(data: str) -> str | None:
     """Extract a printable character from a Kitty CSI-u sequence, or None."""
-    m = _CSI_U_RE.match(data)
-    if not m:
-        return None
-    cp = int(m.group(1))
-    shifted = int(m.group(2)) if m.group(2) and len(m.group(2)) > 0 else None
-    mod_val = int(m.group(4)) if m.group(4) else 1
-    modifier = mod_val - 1 if mod_val > 0 else 0
-
-    if modifier & ~_KITTY_PRINTABLE_ALLOWED:
-        return None
-    if modifier & (MODIFIERS["alt"] | MODIFIERS["ctrl"]):
+    event = _parse_kitty_event(data)
+    if event is None:
         return None
 
-    eff_cp = cp
-    if (modifier & MODIFIERS["shift"]) and shifted is not None:
-        eff_cp = shifted
-    if eff_cp < 32:
+    if event.modifiers & ~_KITTY_PRINTABLE_ALLOWED:
         return None
+    if event.modifiers & (Modifier.ALT | Modifier.CTRL):
+        return None
+
+    effective_codepoint = event.codepoint
+    if event.modifiers & Modifier.SHIFT and event.shifted_key is not None:
+        effective_codepoint = event.shifted_key
+    if effective_codepoint < 32:
+        return None
+
     try:
-        return chr(eff_cp)
-    except (ValueError, OverflowError):
+        return chr(effective_codepoint)
+    except (OverflowError, ValueError):
         return None

@@ -169,7 +169,6 @@ class TestMatchesKeyLegacy:
     def test_rxvt_shift_up(self) -> None:
         assert matches_key("\x1b[a", "shift+up")
 
-    @pytest.mark.xfail(reason="matches_key ctrl branch only checks left/right legacy seqs")
     def test_rxvt_ctrl_up(self) -> None:
         assert matches_key("\x1bOa", "ctrl+up")
 
