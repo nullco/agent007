@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from pana.tui.escape_codes import EscapeCodes
-from pana.tui.protocols.kitty.keyboard import KittyKeyboardProtocolController
+from pana.tui.protocols.keyboard import KeyboardProtocolController
 from pana.tui.stdin_buffer import StdinBuffer
 
 
@@ -72,7 +72,7 @@ class ProcessTerminal:
         self._stdin_fd: int | None = None
         self._stdin_buffer: StdinBuffer | None = None
         self._write_log_path: str = os.environ.get("PANA_TUI_WRITE_LOG", "")
-        self._keyboard_protocol = KittyKeyboardProtocolController(self.write)
+        self._keyboard_protocol = KeyboardProtocolController(self.write)
 
     def start(self, on_resize: Callable[[], None]) -> None:
         self._on_resize = on_resize

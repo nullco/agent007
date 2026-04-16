@@ -12,19 +12,19 @@ import pytest
 from pana.tui.keys import (
     matches_key,
     parse_key,
-    set_kitty_protocol_active,
+    set_enhanced_keyboard_protocol_active,
 )
 
 # ---------------------------------------------------------------------------
-# Fixture: ensure Kitty protocol state is restored after each test
+# Fixture: ensure enhanced keyboard protocol state is restored after each test
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _reset_kitty_state() -> None:
-    set_kitty_protocol_active(False)
+def _reset_enhanced_keyboard_state() -> None:
+    set_enhanced_keyboard_protocol_active(False)
     yield  # type: ignore[misc]
-    set_kitty_protocol_active(False)
+    set_enhanced_keyboard_protocol_active(False)
 
 
 # ===================================================================
@@ -89,7 +89,7 @@ class TestMatchesKeyKittyAlternateKeys:
 # ===================================================================
 
 
-class TestMatchesKeyModifyOtherKeys:
+class TestMatchesKeyXtermModifyOtherKeys:
     """xterm modifyOtherKeys (CSI 27;mod;code ~) sequences."""
 
     def test_ctrl_c(self) -> None:
@@ -120,13 +120,13 @@ class TestMatchesKeyLegacy:
         assert matches_key("\x1b", "escape")
 
     def test_linefeed_as_enter_kitty_inactive(self) -> None:
-        """\\n matches enter when kitty protocol is inactive."""
-        set_kitty_protocol_active(False)
+        """\\n matches enter when enhanced keyboard protocol is inactive."""
+        set_enhanced_keyboard_protocol_active(False)
         assert matches_key("\n", "enter")
 
     def test_linefeed_as_shift_enter_kitty_active(self) -> None:
-        """\\n treated as shift+enter when kitty protocol is active."""
-        set_kitty_protocol_active(True)
+        """\\n treated as shift+enter when enhanced keyboard protocol is active."""
+        set_enhanced_keyboard_protocol_active(True)
         assert matches_key("\n", "shift+enter")
         assert not matches_key("\n", "enter")
 
@@ -269,13 +269,13 @@ class TestParseKeyLegacy:
         assert parse_key("\x7f") == "backspace"
 
     def test_enter(self) -> None:
-        set_kitty_protocol_active(False)
+        set_enhanced_keyboard_protocol_active(False)
         assert parse_key("\r") == "enter"
 
     def test_linefeed_enter_kitty_inactive(self) -> None:
-        set_kitty_protocol_active(False)
+        set_enhanced_keyboard_protocol_active(False)
         assert parse_key("\n") == "enter"
 
     def test_linefeed_shift_enter_kitty_active(self) -> None:
-        set_kitty_protocol_active(True)
+        set_enhanced_keyboard_protocol_active(True)
         assert parse_key("\n") == "shift+enter"

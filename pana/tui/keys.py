@@ -1,30 +1,30 @@
 """Keyboard input handling for terminal applications.
 
-Supports both legacy terminal sequences and Kitty keyboard protocol.
+Supports legacy terminal input, Kitty keyboard protocol, and xterm modifyOtherKeys sequences.
 See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 
 API:
 - matchesKey(data, keyId) - Check if input matches a key identifier
 - parseKey(data)          - Parse input and return the key identifier
 - Key                     - Helper object for creating typed key identifiers
-- setKittyProtocolActive  - Set global Kitty protocol state
-- isKittyProtocolActive   - Query global Kitty protocol state
+- setEnhancedKeyboardProtocolActive - Set global enhanced keyboard protocol state
+- isEnhancedKeyboardProtocolActive  - Query global enhanced keyboard protocol state
 """
 from __future__ import annotations
 
 import os
 import re
 
-_kitty_protocol_active = False
+_enhanced_keyboard_protocol_active = False
 
 
-def set_kitty_protocol_active(active: bool) -> None:
-    global _kitty_protocol_active
-    _kitty_protocol_active = active
+def set_enhanced_keyboard_protocol_active(active: bool) -> None:
+    global _enhanced_keyboard_protocol_active
+    _enhanced_keyboard_protocol_active = active
 
 
-def is_kitty_protocol_active() -> bool:
-    return _kitty_protocol_active
+def is_enhanced_keyboard_protocol_active() -> bool:
+    return _enhanced_keyboard_protocol_active
 
 
 
@@ -323,25 +323,25 @@ def _matches_kitty(data: str, expected_cp: int, expected_mod: int) -> bool:
     return False
 
 
-def _parse_modify_other_keys(data: str) -> dict | None:
+def _parse_xterm_modify_other_keys(data: str) -> dict | None:
     m = _MODIFY_OTHER_RE.match(data)
     if not m:
         return None
     return {"codepoint": int(m.group(2)), "modifier": int(m.group(1)) - 1}
 
 
-def _matches_modify_other(data: str, keycode: int, modifier: int) -> bool:
-    parsed = _parse_modify_other_keys(data)
+def _matches_xterm_modify_other_keys(data: str, keycode: int, modifier: int) -> bool:
+    parsed = _parse_xterm_modify_other_keys(data)
     if not parsed:
         return False
     return parsed["codepoint"] == keycode and parsed["modifier"] == modifier
 
 
-def _matches_printable_modify_other(data: str, keycode: int, modifier: int) -> bool:
+def _matches_printable_xterm_modify_other_keys(data: str, keycode: int, modifier: int) -> bool:
     """Match modifyOtherKeys only when modifier != 0 (printable key context)."""
     if modifier == 0:
         return False
-    return _matches_modify_other(data, keycode, modifier)
+    return _matches_xterm_modify_other_keys(data, keycode, modifier)
 
 
 
@@ -490,11 +490,11 @@ def matches_key(data: str, key_id: str) -> bool:
         return (
             data == "\x1b"
             or _matches_kitty(data, CODEPOINTS["escape"], 0)
-            or _matches_modify_other(data, CODEPOINTS["escape"], 0)
+            or _matches_xterm_modify_other_keys(data, CODEPOINTS["escape"], 0)
         )
 
     if key == "space":
-        if not _kitty_protocol_active:
+        if not _enhanced_keyboard_protocol_active:
             if ctrl and not alt and not shift and data == "\x00":
                 return True
             if alt and not ctrl and not shift and data == "\x1b ":
@@ -503,11 +503,11 @@ def matches_key(data: str, key_id: str) -> bool:
             return (
                 data == " "
                 or _matches_kitty(data, CODEPOINTS["space"], 0)
-                or _matches_modify_other(data, CODEPOINTS["space"], 0)
+                or _matches_xterm_modify_other_keys(data, CODEPOINTS["space"], 0)
             )
         return (
             _matches_kitty(data, CODEPOINTS["space"], modifier)
-            or _matches_modify_other(data, CODEPOINTS["space"], modifier)
+            or _matches_xterm_modify_other_keys(data, CODEPOINTS["space"], modifier)
         )
 
     if key == "tab":
@@ -515,13 +515,13 @@ def matches_key(data: str, key_id: str) -> bool:
             return (
                 data == "\x1b[Z"
                 or _matches_kitty(data, CODEPOINTS["tab"], MODIFIERS["shift"])
-                or _matches_modify_other(data, CODEPOINTS["tab"], MODIFIERS["shift"])
+                or _matches_xterm_modify_other_keys(data, CODEPOINTS["tab"], MODIFIERS["shift"])
             )
         if modifier == 0:
             return data == "\t" or _matches_kitty(data, CODEPOINTS["tab"], 0)
         return (
             _matches_kitty(data, CODEPOINTS["tab"], modifier)
-            or _matches_modify_other(data, CODEPOINTS["tab"], modifier)
+            or _matches_xterm_modify_other_keys(data, CODEPOINTS["tab"], modifier)
         )
 
     if key in ("enter", "return"):
@@ -531,9 +531,9 @@ def matches_key(data: str, key_id: str) -> bool:
                 or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["shift"])
             ):
                 return True
-            if _matches_modify_other(data, CODEPOINTS["enter"], MODIFIERS["shift"]):
+            if _matches_xterm_modify_other_keys(data, CODEPOINTS["enter"], MODIFIERS["shift"]):
                 return True
-            if _kitty_protocol_active:
+            if _enhanced_keyboard_protocol_active:
                 return data == "\x1b\r" or data == "\n"
             return False
         if alt and not ctrl and not shift:
@@ -542,15 +542,15 @@ def matches_key(data: str, key_id: str) -> bool:
                 or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["alt"])
             ):
                 return True
-            if _matches_modify_other(data, CODEPOINTS["enter"], MODIFIERS["alt"]):
+            if _matches_xterm_modify_other_keys(data, CODEPOINTS["enter"], MODIFIERS["alt"]):
                 return True
-            if not _kitty_protocol_active:
+            if not _enhanced_keyboard_protocol_active:
                 return data == "\x1b\r"
             return False
         if modifier == 0:
             return (
                 data == "\r"
-                or (not _kitty_protocol_active and data == "\n")
+                or (not _enhanced_keyboard_protocol_active and data == "\n")
                 or data == "\x1bOM"
                 or _matches_kitty(data, CODEPOINTS["enter"], 0)
                 or _matches_kitty(data, CODEPOINTS["kpEnter"], 0)
@@ -558,7 +558,7 @@ def matches_key(data: str, key_id: str) -> bool:
         return (
             _matches_kitty(data, CODEPOINTS["enter"], modifier)
             or _matches_kitty(data, CODEPOINTS["kpEnter"], modifier)
-            or _matches_modify_other(data, CODEPOINTS["enter"], modifier)
+            or _matches_xterm_modify_other_keys(data, CODEPOINTS["enter"], modifier)
         )
 
     if key == "backspace":
@@ -567,7 +567,7 @@ def matches_key(data: str, key_id: str) -> bool:
                 return True
             return (
                 _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
-                or _matches_modify_other(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
+                or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
             )
         if ctrl and not alt and not shift:
             # 0x08 is ambiguous: Ctrl+Backspace on Windows Terminal, plain Backspace elsewhere
@@ -575,17 +575,17 @@ def matches_key(data: str, key_id: str) -> bool:
                 return True
             return (
                 _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
-                or _matches_modify_other(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
+                or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
             )
         if modifier == 0:
             return (
                 _matches_raw_backspace(data, 0)
                 or _matches_kitty(data, CODEPOINTS["backspace"], 0)
-                or _matches_modify_other(data, CODEPOINTS["backspace"], 0)
+                or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], 0)
             )
         return (
             _matches_kitty(data, CODEPOINTS["backspace"], modifier)
-            or _matches_modify_other(data, CODEPOINTS["backspace"], modifier)
+            or _matches_xterm_modify_other_keys(data, CODEPOINTS["backspace"], modifier)
         )
 
     # Functional keys
@@ -625,13 +625,13 @@ def matches_key(data: str, key_id: str) -> bool:
             if key == "left":
                 if data in ("\x1b[1;3D", "\x1bb"):
                     return True
-                if not _kitty_protocol_active and data == "\x1bB":
+                if not _enhanced_keyboard_protocol_active and data == "\x1bB":
                     return True
                 return _matches_kitty(data, cp, MODIFIERS["alt"])
             if key == "right":
                 if data in ("\x1b[1;3C", "\x1bf"):
                     return True
-                if not _kitty_protocol_active and data == "\x1bF":
+                if not _enhanced_keyboard_protocol_active and data == "\x1bF":
                     return True
                 return _matches_kitty(data, cp, MODIFIERS["alt"])
 
@@ -674,10 +674,10 @@ def matches_key(data: str, key_id: str) -> bool:
         is_letter = "a" <= key <= "z"
         is_digit = "0" <= key <= "9"
 
-        if ctrl and alt and not shift and not _kitty_protocol_active and raw_ctrl:
+        if ctrl and alt and not shift and not _enhanced_keyboard_protocol_active and raw_ctrl:
             return data == f"\x1b{raw_ctrl}"
 
-        if alt and not ctrl and not shift and not _kitty_protocol_active and (is_letter or is_digit):
+        if alt and not ctrl and not shift and not _enhanced_keyboard_protocol_active and (is_letter or is_digit):
             if data == f"\x1b{key}":
                 return True
 
@@ -686,14 +686,14 @@ def matches_key(data: str, key_id: str) -> bool:
                 return True
             return (
                 _matches_kitty(data, codepoint, MODIFIERS["ctrl"])
-                or _matches_printable_modify_other(data, codepoint, MODIFIERS["ctrl"])
+                or _matches_printable_xterm_modify_other_keys(data, codepoint, MODIFIERS["ctrl"])
             )
 
         if ctrl and shift and not alt:
             mod = MODIFIERS["shift"] + MODIFIERS["ctrl"]
             return (
                 _matches_kitty(data, codepoint, mod)
-                or _matches_printable_modify_other(data, codepoint, mod)
+                or _matches_printable_xterm_modify_other_keys(data, codepoint, mod)
             )
 
         if shift and not ctrl and not alt:
@@ -701,13 +701,13 @@ def matches_key(data: str, key_id: str) -> bool:
                 return True
             return (
                 _matches_kitty(data, codepoint, MODIFIERS["shift"])
-                or _matches_printable_modify_other(data, codepoint, MODIFIERS["shift"])
+                or _matches_printable_xterm_modify_other_keys(data, codepoint, MODIFIERS["shift"])
             )
 
         if modifier != 0:
             return (
                 _matches_kitty(data, codepoint, modifier)
-                or _matches_printable_modify_other(data, codepoint, modifier)
+                or _matches_printable_xterm_modify_other_keys(data, codepoint, modifier)
             )
 
         return data == key or _matches_kitty(data, codepoint, 0)
@@ -725,12 +725,12 @@ def parse_key(data: str) -> str | None:
             kitty["codepoint"], kitty["modifier"], kitty.get("base_layout_key")
         )
 
-    mok = _parse_modify_other_keys(data)
+    mok = _parse_xterm_modify_other_keys(data)
     if mok:
         return _format_parsed_key(mok["codepoint"], mok["modifier"])
 
     # Mode-aware sequences
-    if _kitty_protocol_active:
+    if _enhanced_keyboard_protocol_active:
         if data in ("\x1b\r", "\n"):
             return "shift+enter"
 
@@ -756,7 +756,7 @@ def parse_key(data: str) -> str | None:
         return "ctrl+alt+-"
     if data == "\t":
         return "tab"
-    if data == "\r" or (not _kitty_protocol_active and data == "\n") or data == "\x1bOM":
+    if data == "\r" or (not _enhanced_keyboard_protocol_active and data == "\n") or data == "\x1bOM":
         return "enter"
     if data == "\x00":
         return "ctrl+space"
@@ -768,18 +768,18 @@ def parse_key(data: str) -> str | None:
         return "ctrl+backspace" if _is_windows_terminal_session() else "backspace"
     if data == "\x1b[Z":
         return "shift+tab"
-    if not _kitty_protocol_active and data == "\x1b\r":
+    if not _enhanced_keyboard_protocol_active and data == "\x1b\r":
         return "alt+enter"
-    if not _kitty_protocol_active and data == "\x1b ":
+    if not _enhanced_keyboard_protocol_active and data == "\x1b ":
         return "alt+space"
     if data in ("\x1b\x7f", "\x1b\x08"):
         return "alt+backspace"
-    if not _kitty_protocol_active and data == "\x1bB":
+    if not _enhanced_keyboard_protocol_active and data == "\x1bB":
         return "alt+left"
-    if not _kitty_protocol_active and data == "\x1bF":
+    if not _enhanced_keyboard_protocol_active and data == "\x1bF":
         return "alt+right"
 
-    if not _kitty_protocol_active and len(data) == 2 and data[0] == "\x1b":
+    if not _enhanced_keyboard_protocol_active and len(data) == 2 and data[0] == "\x1b":
         code = ord(data[1])
         if 1 <= code <= 26:
             return f"ctrl+alt+{chr(code + 96)}"

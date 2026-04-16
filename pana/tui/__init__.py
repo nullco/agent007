@@ -39,12 +39,12 @@ from pana.tui.keybindings import (
 from pana.tui.keys import (
     Key,
     decode_kitty_printable,
+    is_enhanced_keyboard_protocol_active,
     is_key_release,
     is_key_repeat,
-    is_kitty_protocol_active,
     matches_key,
     parse_key,
-    set_kitty_protocol_active,
+    set_enhanced_keyboard_protocol_active,
 )
 from pana.tui.stdin_buffer import StdinBuffer
 from pana.tui.terminal import ProcessTerminal, Terminal
@@ -135,10 +135,10 @@ __all__ = [
     "decode_kitty_printable",
     "is_key_release",
     "is_key_repeat",
-    "is_kitty_protocol_active",
+    "is_enhanced_keyboard_protocol_active",
     "matches_key",
     "parse_key",
-    "set_kitty_protocol_active",
+    "set_enhanced_keyboard_protocol_active",
     # stdin
     "StdinBuffer",
     # terminal

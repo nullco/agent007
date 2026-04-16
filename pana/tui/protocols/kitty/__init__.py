@@ -7,18 +7,12 @@ from pana.tui.protocols.kitty.graphics import (
     encode_kitty,
     is_kitty_image_line,
 )
-from pana.tui.protocols.kitty.keyboard import (
-    KeyboardProtocolMode,
-    KittyKeyboardProtocolController,
-)
 from pana.tui.protocols.kitty.sequences import (
     KITTY_GRAPHICS_PREFIX,
     KITTY_GRAPHICS_SUFFIX,
     KITTY_KEYBOARD_DISABLE,
     KITTY_KEYBOARD_ENABLE,
     KITTY_KEYBOARD_QUERY,
-    MODIFY_OTHER_KEYS_OFF,
-    MODIFY_OTHER_KEYS_ON,
     parse_kitty_keyboard_query_response,
 )
 
@@ -28,10 +22,6 @@ __all__ = [
     "KITTY_KEYBOARD_DISABLE",
     "KITTY_KEYBOARD_ENABLE",
     "KITTY_KEYBOARD_QUERY",
-    "KeyboardProtocolMode",
-    "KittyKeyboardProtocolController",
-    "MODIFY_OTHER_KEYS_OFF",
-    "MODIFY_OTHER_KEYS_ON",
     "allocate_image_id",
     "delete_all_kitty_images",
     "delete_kitty_image",
