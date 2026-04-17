@@ -85,6 +85,14 @@ def function_to_tool_def(fn: Callable) -> ToolDef:
         description_lines.append(line)
     description = "\n".join(description_lines).strip()
 
+    explicit_schema = getattr(fn, "__pana_tool_parameters_schema__", None)
+    if isinstance(explicit_schema, dict):
+        return ToolDef(
+            name=fn.__name__,
+            description=description,
+            parameters=explicit_schema,
+        )
+
     arg_descriptions = _parse_args_from_docstring(docstring)
 
     properties: dict[str, dict[str, str]] = {}

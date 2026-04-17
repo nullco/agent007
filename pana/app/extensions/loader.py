@@ -3,9 +3,9 @@
 Auto-discovery locations (checked in order):
 
 * ``~/.pana/extensions/*.py``
-* ``~/.pana/extensions/*/index.py``
+* ``~/.pana/extensions/*/__init__.py``
 * ``.pana/extensions/*.py``
-* ``.pana/extensions/*/index.py``
+* ``.pana/extensions/*/__init__.py``
 
 Additional paths may be supplied via the ``-e`` / ``--extension`` CLI flag.
 """
@@ -16,70 +16,78 @@ import importlib.util
 import logging
 from pathlib import Path
 
+from pana.app.extensions.api import SourceInfo
+
 logger = logging.getLogger(__name__)
 
 
 def discover_extension_paths(extra_paths: list[str] | None = None) -> list[Path]:
-    """Return all extension file paths from standard locations plus *extra_paths*.
-
-    Duplicates are removed while preserving discovery order.
-    """
+    """Return all extension file paths from standard locations plus *extra_paths*."""
     paths: list[Path] = []
 
-    # Global: ~/.pana/extensions/
     _collect_from_dir(Path.home() / ".pana" / "extensions", paths)
-
-    # Project-local: .pana/extensions/
     _collect_from_dir(Path.cwd() / ".pana" / "extensions", paths)
 
-    # Explicit paths (-e flag)
     for raw in extra_paths or []:
         path = Path(raw).expanduser().resolve()
         if path.is_dir():
-            index = path / "index.py"
-            if index.exists():
-                paths.append(index)
+            package_init = path / "__init__.py"
+            if package_init.exists():
+                paths.append(package_init)
             else:
-                logger.warning("Extension directory has no index.py: %s", path)
+                logger.warning("Extension directory has no __init__.py: %s", path)
         elif path.exists() and path.suffix == ".py":
             paths.append(path)
         else:
             logger.warning("Extension path not found or not a .py file: %s", raw)
 
-    # Deduplicate, preserving order
     seen: set[Path] = set()
     result: list[Path] = []
-    for p in paths:
-        if p not in seen:
-            seen.add(p)
-            result.append(p)
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            result.append(path)
     return result
 
 
+def build_source_info(path: Path) -> SourceInfo:
+    """Build source metadata for a discovered extension path."""
+    resolved_path = path.expanduser().resolve()
+    global_root = (Path.home() / ".pana" / "extensions").resolve()
+    project_root = (Path.cwd() / ".pana" / "extensions").resolve()
+
+    try:
+        resolved_path.relative_to(global_root)
+        scope = "global"
+    except ValueError:
+        try:
+            resolved_path.relative_to(project_root)
+            scope = "project"
+        except ValueError:
+            scope = "cli"
+
+    if resolved_path.name == "__init__.py":
+        name = resolved_path.parent.name
+    else:
+        name = resolved_path.stem
+
+    return SourceInfo(path=str(resolved_path), name=name, scope=scope)
+
+
 def _collect_from_dir(directory: Path, paths: list[Path]) -> None:
-    """Append extension .py files found inside *directory* to *paths*."""
     if not directory.is_dir():
         return
-    # Top-level .py files (skip __init__.py and _private.py)
-    for f in sorted(directory.glob("*.py")):
-        if not f.name.startswith("_"):
-            paths.append(f)
-    # Subdirectory index.py files
-    for sub in sorted(d for d in directory.iterdir() if d.is_dir()):
-        index = sub / "index.py"
-        if index.exists():
-            paths.append(index)
+    for file_path in sorted(directory.glob("*.py")):
+        if not file_path.name.startswith("_"):
+            paths.append(file_path)
+    for subdirectory in sorted(path for path in directory.iterdir() if path.is_dir()):
+        package_init = subdirectory / "__init__.py"
+        if package_init.exists():
+            paths.append(package_init)
 
 
 def load_extension(path: Path, api: object) -> bool:
-    """Load a single extension file and call its ``setup(pana)`` function.
-
-    Returns ``True`` on success, ``False`` on failure (error is logged).
-
-    The extension module is loaded in isolation: a unique module name is
-    generated from the file path so that multiple extensions with the same
-    filename do not collide.
-    """
+    """Load a single extension file and call its ``setup(pana)`` function."""
     module_name = f"pana_ext_{path.stem}_{abs(hash(str(path)))}"
     try:
         spec = importlib.util.spec_from_file_location(module_name, path)

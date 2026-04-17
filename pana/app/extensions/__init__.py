@@ -3,9 +3,9 @@
 Extensions are Python modules placed in:
 
 * ``~/.pana/extensions/*.py``  (global)
-* ``~/.pana/extensions/*/index.py``  (global, subdirectory style)
+* ``~/.pana/extensions/*/__init__.py``  (global, package style)
 * ``.pana/extensions/*.py``  (project-local)
-* ``.pana/extensions/*/index.py``  (project-local, subdirectory style)
+* ``.pana/extensions/*/__init__.py``  (project-local, package style)
 
 or loaded explicitly with the ``-e`` / ``--extension`` CLI flag.
 
@@ -26,15 +26,20 @@ from pana.app.extensions.api import (
     ExtensionAPI,
     ExtensionContext,
     InputEvent,
+    ModelInfo,
     SessionShutdownEvent,
     SessionStartEvent,
+    SourceInfo,
     ToolCallEvent,
     ToolDefinition,
+    ToolExecutionEndEvent,
+    ToolExecutionResult,
+    ToolExecutionStartEvent,
     ToolResultEvent,
     TurnEndEvent,
     TurnStartEvent,
 )
-from pana.app.extensions.loader import discover_extension_paths, load_extension
+from pana.app.extensions.loader import build_source_info, discover_extension_paths, load_extension
 from pana.app.extensions.manager import ExtensionManager
 
 __all__ = [
@@ -45,6 +50,9 @@ __all__ = [
     "ToolDefinition",
     "CommandDefinition",
     "ExecResult",
+    "ToolExecutionResult",
+    "SourceInfo",
+    "ModelInfo",
     # Events
     "SessionStartEvent",
     "SessionShutdownEvent",
@@ -56,8 +64,11 @@ __all__ = [
     "TurnEndEvent",
     "ToolCallEvent",
     "ToolResultEvent",
+    "ToolExecutionStartEvent",
+    "ToolExecutionEndEvent",
     # Infrastructure
     "ExtensionManager",
+    "build_source_info",
     "discover_extension_paths",
     "load_extension",
 ]

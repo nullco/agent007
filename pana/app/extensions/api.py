@@ -9,19 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
     from pana.app.context import UIContext
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Shell execution helper
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -34,9 +30,36 @@ class ExecResult:
     killed: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Tool and command definitions
-# ---------------------------------------------------------------------------
+@dataclass
+class ToolExecutionResult:
+    """Normalized result returned by extension and built-in tools."""
+
+    content: str
+    details: object | None = None
+    is_error: bool = False
+
+
+ToolReturnValue = str | ToolExecutionResult
+ToolExecuteCallable = Callable[..., Coroutine[object, object, ToolReturnValue] | ToolReturnValue]
+CommandHandler = Callable[..., Coroutine[object, object, None] | None]
+
+
+@dataclass(frozen=True)
+class SourceInfo:
+    """Metadata describing where an extension was loaded from."""
+
+    path: str
+    name: str
+    scope: Literal["global", "project", "cli", "unknown"]
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    """Public model metadata exposed to extensions."""
+
+    provider_name: str
+    model_name: str
+    thinking_level: str
 
 
 @dataclass
@@ -44,27 +67,15 @@ class ToolDefinition:
     """Definition of a custom tool registered by an extension.
 
     The ``execute`` function's type annotations define the tool's parameter
-    schema — the agent introspects the function signature to build the JSON
-    schema for the LLM.  The docstring is used as the tool description if
-    ``description`` is not supplied.
-
-    Example::
-
-        async def my_tool(path: str, count: int = 1) -> str:
-            \"\"\"Do something with a file.\"\"\"
-            return "done"
-
-        pana.register_tool(ToolDefinition(
-            name="my_tool",
-            description="Do something with a file",
-            execute=my_tool,
-        ))
+    schema unless ``parameters_schema`` is provided explicitly.
     """
 
     name: str
-    execute: Callable[..., Coroutine[Any, Any, str]]
+    execute: ToolExecuteCallable
     description: str = ""
     label: str = ""
+    parameters_schema: dict[str, object] | None = None
+    prompt_snippet: str | None = None
 
 
 @dataclass
@@ -76,32 +87,50 @@ class CommandDefinition:
     """
 
     description: str
-    handler: Callable[..., Coroutine[Any, Any, None]]
-
-
-# ---------------------------------------------------------------------------
-# Extension context
-# ---------------------------------------------------------------------------
+    handler: CommandHandler
 
 
 @dataclass
 class ExtensionContext:
-    """Context object passed to every extension event handler and command handler.
+    """Context object passed to every extension handler.
 
     Attributes:
-        cwd:    Current working directory.
-        ui:     Full UI context (see :class:`~pana.app.context.UIContext`).
-        signal: The active agent cancellation event, or ``None`` outside a run.
+        cwd: Current working directory.
+        ui: Full UI context.
+        signal: Active cancellation event, or ``None`` outside a run.
+        model: Public model metadata for the active agent, if any.
     """
 
     cwd: str
     ui: UIContext
     signal: asyncio.Event | None = None
+    model: ModelInfo | None = None
+    _is_idle: Callable[[], bool] | None = None
+    _abort: Callable[[], None] | None = None
+    _shutdown: Callable[[], None] | None = None
+    _get_system_prompt: Callable[[], str] | None = None
 
+    def is_idle(self) -> bool:
+        """Return whether the app is currently idle."""
+        if self._is_idle is None:
+            return True
+        return self._is_idle()
 
-# ---------------------------------------------------------------------------
-# Event data-classes
-# ---------------------------------------------------------------------------
+    def abort(self) -> None:
+        """Abort the current run if one is active."""
+        if self._abort is not None:
+            self._abort()
+
+    def shutdown(self) -> None:
+        """Request a graceful shutdown."""
+        if self._shutdown is not None:
+            self._shutdown()
+
+    def get_system_prompt(self) -> str:
+        """Return the current effective system prompt."""
+        if self._get_system_prompt is None:
+            return ""
+        return self._get_system_prompt()
 
 
 @dataclass
@@ -114,19 +143,32 @@ class SessionShutdownEvent:
     """Fired when the application is about to exit."""
 
 
+class InputContinueResult(TypedDict):
+    action: Literal["continue"]
+
+
+class InputTransformResult(TypedDict):
+    action: Literal["transform"]
+    text: str
+
+
+class InputHandledResult(TypedDict):
+    action: Literal["handled"]
+
+
+InputEventResult = InputContinueResult | InputTransformResult | InputHandledResult
+
+
 @dataclass
 class InputEvent:
-    """Fired when the user submits text, before command dispatch.
-
-    Handlers may return:
-
-    * ``{"action": "continue"}``  — pass the text through unchanged (default).
-    * ``{"action": "transform", "text": "…"}``  — replace the input text.
-    * ``{"action": "handled"}``  — stop processing; do not run the agent.
-    """
+    """Fired when the user submits text, before command dispatch."""
 
     text: str
-    source: str = "interactive"  # "interactive" | "extension"
+    source: str = "interactive"
+
+
+class BeforeAgentStartEventResult(TypedDict, total=False):
+    system_prompt: str
 
 
 @dataclass
@@ -169,115 +211,96 @@ class TurnEndEvent:
     turn_index: int
 
 
+class ToolCallEventResult(TypedDict, total=False):
+    block: bool
+    reason: str
+
+
 @dataclass
 class ToolCallEvent:
-    """Fired before a tool executes.
-
-    Handlers may return ``{"block": True, "reason": "…"}`` to prevent
-    execution.  The ``input`` dict is mutable — modifications affect the
-    actual tool call.
-    """
+    """Fired before a tool executes."""
 
     tool_name: str
-    input: dict = field(default_factory=dict)
+    input: dict[str, object] = field(default_factory=dict)
+    tool_call_id: str | None = None
+
+
+class ToolResultEventResult(TypedDict, total=False):
+    content: str
+    details: object | None
+    is_error: bool
 
 
 @dataclass
 class ToolResultEvent:
-    """Fired after a tool completes, before the result is sent to the LLM.
-
-    Handlers may return ``{"content": "…"}`` to replace the result text.
-    """
+    """Fired after a tool completes, before the result is returned to the agent."""
 
     tool_name: str
-    input: dict
+    input: dict[str, object]
     content: str
+    details: object | None = None
     is_error: bool = False
+    tool_call_id: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# ExtensionAPI
-# ---------------------------------------------------------------------------
+@dataclass
+class ToolExecutionStartEvent:
+    """Fired immediately before a tool begins executing."""
+
+    tool_name: str
+    args: dict[str, object]
+    tool_call_id: str | None = None
+
+
+@dataclass
+class ToolExecutionEndEvent:
+    """Fired immediately after a tool finishes executing."""
+
+    tool_name: str
+    args: dict[str, object]
+    result: ToolExecutionResult
+    tool_call_id: str | None = None
 
 
 class ExtensionAPI:
-    """API object passed to each extension's ``setup()`` function.
-
-    Each loaded extension receives its own ``ExtensionAPI`` instance.
-
-    Example extension (``~/.pana/extensions/my_ext.py``)::
-
-        from pana.app.extensions.api import ExtensionAPI, ToolDefinition, CommandDefinition
-
-        def setup(pana: ExtensionAPI) -> None:
-            @pana.on("session_start")
-            async def on_start(event, ctx):
-                ctx.ui.notify("Extension loaded!", "info")
-
-            pana.on("tool_call", lambda event, ctx: (
-                {"block": True, "reason": "rm -rf blocked"}
-                if event.tool_name == "bash" and "rm -rf" in event.input.get("command", "")
-                else None
-            ))
-
-            pana.register_command("hello", CommandDefinition(
-                description="Say hello",
-                handler=lambda args, ctx: ctx.ui.notify(f"Hello {args or 'world'}!"),
-            ))
-    """
+    """API object passed to each extension's ``setup()`` function."""
 
     def __init__(self) -> None:
-        self._handlers: dict[str, list[Callable]] = {}
+        self._handlers: dict[str, list[Callable[..., object]]] = {}
         self._tools: list[ToolDefinition] = []
         self._commands: dict[str, CommandDefinition] = {}
 
-    def on(self, event: str, handler: Callable | None = None) -> Callable:
-        """Subscribe *handler* to *event*.
-
-        May be used as a plain call or as a decorator::
-
-            pana.on("session_start", my_handler)
-
-            @pana.on("tool_call")
-            async def guard(event, ctx):
-                ...
-
-        Args:
-            event:   Event name (e.g. ``"tool_call"``, ``"session_start"``).
-            handler: Callable to register.  When used as a decorator, omit
-                     this argument and the decorated function is registered.
-
-        Returns:
-            The handler (for decorator usage).
-        """
+    def on(self, event: str, handler: Callable[..., object] | None = None) -> Callable[..., object]:
+        """Subscribe *handler* to *event*."""
         if handler is not None:
             self._handlers.setdefault(event, []).append(handler)
             return handler
 
-        # Decorator form: @pana.on("event")
-        def decorator(fn: Callable) -> Callable:
+        def decorator(fn: Callable[..., object]) -> Callable[..., object]:
             self._handlers.setdefault(event, []).append(fn)
             return fn
 
         return decorator
 
     def register_tool(self, definition: ToolDefinition) -> None:
-        """Register a custom tool the LLM can call.
-
-        Args:
-            definition: :class:`ToolDefinition` with name, execute function,
-                        and optional description/label.
-        """
+        """Register a custom tool the LLM can call."""
         self._tools.append(definition)
 
     def register_command(self, name: str, definition: CommandDefinition) -> None:
-        """Register a slash command.
-
-        Args:
-            name:       Command name without the leading ``/``.
-            definition: :class:`CommandDefinition` with description and handler.
-        """
+        """Register a slash command."""
         self._commands[name] = definition
+
+    def get_handlers(self, event: str) -> list[Callable[..., object]]:
+        """Return handlers registered for *event*."""
+        return list(self._handlers.get(event, []))
+
+    def get_tools(self) -> list[ToolDefinition]:
+        """Return tools registered by this extension."""
+        return list(self._tools)
+
+    def get_commands(self) -> dict[str, CommandDefinition]:
+        """Return commands registered by this extension."""
+        return dict(self._commands)
 
     async def exec(
         self,
@@ -288,18 +311,7 @@ class ExtensionAPI:
         timeout: float | None = None,
         cwd: str | None = None,
     ) -> ExecResult:
-        """Execute a shell command and return its output.
-
-        Args:
-            command: Executable to run.
-            args:    Optional argument list.
-            signal:  Cancellation event.
-            timeout: Timeout in seconds.
-            cwd:     Working directory (defaults to ``Path.cwd()``).
-
-        Returns:
-            :class:`ExecResult` with stdout, stderr, exit code, and killed flag.
-        """
+        """Execute a shell command and return its output."""
         effective_cwd = cwd or str(Path.cwd())
         proc: asyncio.subprocess.Process | None = None
         try:
@@ -314,8 +326,8 @@ class ExtensionAPI:
             comm_coro = proc.communicate()
 
             if signal is not None:
-                cancel_task: asyncio.Future = asyncio.ensure_future(signal.wait())
-                comm_task: asyncio.Future = asyncio.ensure_future(comm_coro)
+                cancel_task = asyncio.ensure_future(signal.wait())
+                comm_task = asyncio.ensure_future(comm_coro)
                 try:
                     done, _ = await asyncio.wait(
                         {cancel_task, comm_task},
@@ -362,3 +374,10 @@ class ExtensionAPI:
             return ExecResult(stdout="", stderr="Timed out", code=-1, killed=True)
         except Exception as exc:
             return ExecResult(stdout="", stderr=str(exc), code=-1)
+
+
+def normalize_tool_execution_result(value: ToolReturnValue | object) -> ToolExecutionResult:
+    """Return a :class:`ToolExecutionResult` for any supported tool return value."""
+    if isinstance(value, ToolExecutionResult):
+        return value
+    return ToolExecutionResult(content=str(value))

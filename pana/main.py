@@ -20,6 +20,7 @@ from pana.app.extensions import (
     InputEvent,
     SessionShutdownEvent,
     SessionStartEvent,
+    build_source_info,
     discover_extension_paths,
     load_extension,
 )
@@ -65,6 +66,8 @@ class PanaApp:
         self._working_message: str = "Working..."
         self._hidden_thinking_label: str = "Thinking..."
         self._tools_expanded: bool = False
+        self._active_cancel_event: asyncio.Event | None = None
+        self._abort_current_run: Callable[[], None] | None = None
 
     def add_message(self, component: object) -> None:
         """Append *component* to the chat area and request a re-render."""
@@ -116,6 +119,27 @@ class PanaApp:
     def stop(self) -> None:
         """Shut down the TUI."""
         self.tui.stop()
+
+    def shutdown(self) -> None:
+        """Request a graceful application shutdown."""
+        self.stop()
+
+    def is_idle(self) -> bool:
+        """Return whether the application is idle."""
+        return not self._awaiting_response and self._stream_task is None and not self._pending_messages
+
+    def abort_current(self) -> None:
+        """Abort the active agent run, if any."""
+        if self._abort_current_run is not None:
+            self._abort_current_run()
+        elif self._active_cancel_event is not None:
+            self._active_cancel_event.set()
+
+    def get_current_system_prompt(self) -> str:
+        """Return the current effective system prompt."""
+        if self.agent is None:
+            return ""
+        return self.agent.get_system_prompt()
 
     def request_render(self) -> None:
         """Request an immediate TUI re-render."""
@@ -315,9 +339,9 @@ class PanaApp:
         for path in paths:
             api = ExtensionAPI()
             if load_extension(path, api):
-                self._extension_manager.add_api(api)
-        # Register extension commands into the global registry
-        for cmd_obj in self._extension_manager.build_command_objects():
+                self._extension_manager.add_api(api, source_info=build_source_info(path))
+        existing_command_names = {command.name for command in default_registry.all_commands()}
+        for cmd_obj in self._extension_manager.build_command_objects(existing_names=existing_command_names):
             default_registry.register(cmd_obj)  # type: ignore[arg-type]
 
     def _setup_ui(self) -> None:
@@ -394,13 +418,12 @@ class PanaApp:
         if self._extension_manager and self._extension_manager.has_extensions:
             ext_ctx = self._extension_manager.make_context()
             input_event = InputEvent(text=text)
-            result = await self._extension_manager.emit("input", input_event, ext_ctx)
-            if isinstance(result, dict):
-                action = result.get("action", "continue")
-                if action == "handled":
-                    return
-                if action == "transform":
-                    text = result.get("text", text)
+            result = await self._extension_manager.dispatch_input(input_event, ext_ctx)
+            action = result.get("action", "continue")
+            if action == "handled":
+                return
+            if action == "transform":
+                text = result.get("text", text)
 
         if text.startswith("/"):
             asyncio.create_task(self._dispatch_command(text))
@@ -439,23 +462,26 @@ class PanaApp:
         user_text = strip_at_prefixes(user_text)
 
         # Fire before_agent_start — extensions may inject extra system-prompt text
+        self.agent.set_extra_system_prompt(None)
         if self._extension_manager and self._extension_manager.has_extensions:
             from pana.app.extensions.api import BeforeAgentStartEvent
             ext_ctx = self._extension_manager.make_context()
             before_event = BeforeAgentStartEvent(prompt=user_text)
-            result = await self._extension_manager.emit(
-                "before_agent_start", before_event, ext_ctx
+            result = await self._extension_manager.dispatch_before_agent_start(
+                before_event,
+                ext_ctx,
             )
             if isinstance(result, dict) and "system_prompt" in result:
                 self.agent.set_extra_system_prompt(str(result["system_prompt"]))
-            else:
-                self.agent.set_extra_system_prompt(None)
 
         cancel_event = asyncio.Event()
+        self._active_cancel_event = cancel_event
         loader = CancellableLoader(self.tui, _theme.accent, _theme.dim, self._working_message)
         renderer = StreamRenderer(self, loader)
 
         def on_abort() -> None:
+            if cancel_event.is_set():
+                return
             renderer.stop()
             cancel_event.set()
             renderer.mark_tools_error()
@@ -467,6 +493,7 @@ class PanaApp:
             self.tui.set_focus(self._editor)  # type: ignore[arg-type]
             self.tui.request_render()
 
+        self._abort_current_run = on_abort
         loader.on_abort = on_abort
         self.add_message(loader)
         self.tui.set_focus(loader)
@@ -499,6 +526,8 @@ class PanaApp:
                 self.tui.set_focus(self._editor)  # type: ignore[arg-type]
 
             self._stream_task = None
+            self._active_cancel_event = None
+            self._abort_current_run = None
             self.tui.request_render()
 
             if not _propagating_cancel:
@@ -534,7 +563,7 @@ class PanaApp:
         # Fire session_start after UI is ready
         if self._extension_manager and self._extension_manager.has_extensions:
             ext_ctx = self._extension_manager.make_context()
-            await self._extension_manager.emit(
+            await self._extension_manager.emit_simple(
                 "session_start", SessionStartEvent(), ext_ctx
             )
 
@@ -547,7 +576,7 @@ class PanaApp:
             if self._extension_manager and self._extension_manager.has_extensions:
                 ext_ctx = self._extension_manager.make_context()
                 try:
-                    await self._extension_manager.emit(
+                    await self._extension_manager.emit_simple(
                         "session_shutdown", SessionShutdownEvent(), ext_ctx
                     )
                 except Exception:

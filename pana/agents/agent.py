@@ -128,8 +128,8 @@ class Agent:
         if self._extension_manager is None:
             return {}
         return {
-            defn.name: defn.description
-            for defn in self._extension_manager.get_tool_definitions()
+            definition.name: definition.prompt_snippet or definition.description
+            for definition in self._extension_manager.get_tool_definitions()
         }
 
     def _get_all_tools(self) -> list[Callable]:
@@ -145,18 +145,27 @@ class Agent:
 
     def _rebuild_tools(self) -> None:
         all_tools = self._get_all_tools()
-        self._tool_fns = {}
-        self._tool_defs = []
+        tools_by_name: dict[str, tuple[ToolDef, Callable]] = {}
         for fn in all_tools:
-            td = function_to_tool_def(fn)
-            self._tool_defs.append(td)
-            self._tool_fns[td.name] = fn
+            tool_definition = function_to_tool_def(fn)
+            if tool_definition.name in tools_by_name:
+                logger.warning("Overriding tool definition: %s", tool_definition.name)
+                tools_by_name.pop(tool_definition.name)
+            tools_by_name[tool_definition.name] = (tool_definition, fn)
 
-    def _build_system_prompt(self) -> str:
-        base_prompt = build_system_prompt(
+        self._tool_defs = [tool_definition for tool_definition, _ in tools_by_name.values()]
+        self._tool_fns = {
+            tool_definition.name: fn for tool_definition, fn in tools_by_name.values()
+        }
+
+    def _build_base_system_prompt(self) -> str:
+        return build_system_prompt(
             extra_tool_snippets=self._get_extension_tool_snippets(),
             skills=self._skills,
         )
+
+    def _build_system_prompt(self) -> str:
+        base_prompt = self._build_base_system_prompt()
         if self._extra_system_prompt:
             return f"{base_prompt}\n\n{self._extra_system_prompt.strip()}"
         return base_prompt
@@ -164,6 +173,12 @@ class Agent:
     @property
     def model_name(self) -> str:
         return self._model.name
+
+    def get_base_system_prompt(self) -> str:
+        return self._build_base_system_prompt()
+
+    def get_system_prompt(self) -> str:
+        return self._build_system_prompt()
 
     @property
     def provider_name(self) -> str:
@@ -206,7 +221,7 @@ class Agent:
             if ext and ext_ctx:
                 from pana.app.extensions.api import AgentStartEvent
 
-                await ext.emit("agent_start", AgentStartEvent(prompt=user_input), ext_ctx)
+                await ext.emit_simple("agent_start", AgentStartEvent(prompt=user_input), ext_ctx)
 
             self._message_history.append(UserMessage(content=user_input))
             turn_index = 0
@@ -218,7 +233,7 @@ class Agent:
                 if ext and ext_ctx:
                     from pana.app.extensions.api import TurnStartEvent
 
-                    await ext.emit("turn_start", TurnStartEvent(turn_index=turn_index), ext_ctx)
+                    await ext.emit_simple("turn_start", TurnStartEvent(turn_index=turn_index), ext_ctx)
 
                 state = _RunState()
                 resolved_thinking = self._model.resolve_thinking(self._thinking_level)
@@ -250,7 +265,7 @@ class Agent:
                     if ext and ext_ctx:
                         from pana.app.extensions.api import TurnEndEvent
 
-                        await ext.emit("turn_end", TurnEndEvent(turn_index=turn_index), ext_ctx)
+                        await ext.emit_simple("turn_end", TurnEndEvent(turn_index=turn_index), ext_ctx)
                     break
 
                 tool_results = await self._execute_tools(
@@ -261,7 +276,7 @@ class Agent:
                 if ext and ext_ctx:
                     from pana.app.extensions.api import TurnEndEvent
 
-                    await ext.emit("turn_end", TurnEndEvent(turn_index=turn_index), ext_ctx)
+                    await ext.emit_simple("turn_end", TurnEndEvent(turn_index=turn_index), ext_ctx)
 
                 turn_index += 1
                 await asyncio.sleep(0)
@@ -269,7 +284,7 @@ class Agent:
             if ext and ext_ctx:
                 from pana.app.extensions.api import AgentEndEvent
 
-                await ext.emit("agent_end", AgentEndEvent(prompt=user_input), ext_ctx)
+                await ext.emit_simple("agent_end", AgentEndEvent(prompt=user_input), ext_ctx)
         finally:
             self._current_cancel_event = None
 

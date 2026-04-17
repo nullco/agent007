@@ -29,7 +29,7 @@ def main() -> None:
         dest="extensions",
         metavar="PATH",
         help=(
-            "Load an extension from PATH (.py file or directory with index.py). "
+            "Load an extension from PATH (.py file or Python package directory with __init__.py). "
             "May be supplied multiple times."
         ),
     )
