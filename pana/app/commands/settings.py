@@ -5,7 +5,6 @@ import logging
 from collections.abc import Awaitable
 from typing import Callable
 
-from pana.agents.agent import THINKING_LEVELS
 from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.commands.base import Command
@@ -54,13 +53,20 @@ class SettingsCommand(Command):
             select.on_cancel = on_cancel
             return select
 
+        if ctx.agent is not None:
+            thinking_values = ctx.agent.supported_thinking_levels
+            thinking_description = "Reasoning depth for the current model"
+        else:
+            thinking_values = None
+            thinking_description = "Select a model first to change thinking level"
+
         items = [
             SettingItem(
                 id="thinking_level",
                 label="Thinking level",
                 current_value=state.get("thinking_level", "medium"),
-                description="Reasoning depth for thinking-capable models",
-                values=list(THINKING_LEVELS),
+                description=thinking_description,
+                values=thinking_values,
             ),
             SettingItem(
                 id="hide_thinking_block",

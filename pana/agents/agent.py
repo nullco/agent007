@@ -188,6 +188,10 @@ class Agent:
     def thinking_level(self) -> str:
         return self._thinking_level
 
+    @property
+    def supported_thinking_levels(self) -> list[str]:
+        return self._model.supported_thinking_levels
+
     def set_thinking_level(self, level: str) -> None:
         if level not in THINKING_LEVELS:
             raise ValueError(f"Invalid thinking level: {level!r}. Must be one of {THINKING_LEVELS}")

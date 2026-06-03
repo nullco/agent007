@@ -7,7 +7,7 @@ class Provider(Protocol):
 
     name: str
 
-    async def authenticate(self, handler):
+    async def authenticate(self, handler, ctx=None):
         ...
 
     async def reauthenticate(self):

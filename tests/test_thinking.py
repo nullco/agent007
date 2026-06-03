@@ -295,6 +295,7 @@ def _make_agent(thinking_level: str = "medium"):
     mock_model.client = MagicMock()
     mock_model.name = "test-model"
     mock_model.provider.name = "test"
+    mock_model.supported_thinking_levels = ["off", "low", "medium", "high"]
 
     with patch.object(Agent, "_rebuild_tools"):
         return Agent(mock_model, thinking_level=thinking_level)
@@ -346,6 +347,12 @@ def test_agent_thinking_level_all_levels() -> None:
     for level in THINKING_LEVELS:
         agent = _make_agent(level)
         assert agent.thinking_level == level
+
+
+def test_agent_supported_thinking_levels() -> None:
+    """Agent exposes the model's supported thinking levels."""
+    agent = _make_agent()
+    assert agent.supported_thinking_levels == ["off", "low", "medium", "high"]
 
 
 # ===================================================================

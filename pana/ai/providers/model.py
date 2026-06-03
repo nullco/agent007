@@ -11,6 +11,7 @@ class ModelInfo:
     thinking_levels: list[str] = field(default_factory=list)
     default_thinking: str = "off"
     display_details: str = ""
+    thinking_mode: str = "reasoning_effort"
 
 
 class Model:

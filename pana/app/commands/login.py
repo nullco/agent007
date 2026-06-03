@@ -25,6 +25,13 @@ class LoginCommand(Command):
             ctx.notify(message, "muted")
 
         try:
-            await get_provider(chosen).authenticate(handler)
+            provider = get_provider(chosen)
+            await provider.authenticate(handler, ctx)
+            current = ctx.agent.provider_name if ctx.agent else None
+            if current != chosen:
+                ctx.notify(
+                    f"Logged in to {chosen}. Use /model to select a {chosen} model.",
+                    "success",
+                )
         except Exception as e:
             ctx.notify(f"Auth failed: {e}", "error")

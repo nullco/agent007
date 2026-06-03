@@ -89,7 +89,7 @@ class CopilotProvider(Provider):
     def __init__(self):
         self._credentials = CredentialStore("github-copilot")
 
-    async def authenticate(self, handler):
+    async def authenticate(self, handler, ctx=None):
         response = await asyncio.to_thread(start_device_flow)
         await handler(f"""[OAuth] Please visit {response.verification_uri}
 Code: {response.user_code}""")

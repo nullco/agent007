@@ -547,13 +547,15 @@ class PanaApp:
         provider_name = state.get("provider")
         if model_id and provider_name:
             try:
-                thinking_level = state.get("thinking_level", "medium")
-                model = await get_provider(provider_name).build_model(model_id)
-                self.agent = Agent(
-                    model,
-                    thinking_level=thinking_level,
-                    extension_manager=self._extension_manager,
-                )
+                provider = get_provider(provider_name)
+                if provider.is_authenticated():
+                    thinking_level = state.get("thinking_level", "medium")
+                    model = await provider.build_model(model_id)
+                    self.agent = Agent(
+                        model,
+                        thinking_level=thinking_level,
+                        extension_manager=self._extension_manager,
+                    )
             except Exception:
                 pass
 
