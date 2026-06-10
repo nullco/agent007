@@ -46,15 +46,9 @@ class LoginCommand(Command):
                     credentials[field.key] = value
 
             await provider.authenticate(handler, credentials)
-
-            current = ctx.agent.provider_name if ctx.agent else None
-            if current != chosen:
-                state.set("provider", chosen)
-                state.set("model", None)
-                ctx.update_footer()
-                ctx.notify(
-                    f"Logged in to {chosen}. Use /model to select a model.",
-                    "success",
-                )
+            ctx.notify(
+                f"Logged in to {chosen}. Use /model to select a model.",
+                "success",
+            )
         except Exception as e:
             ctx.notify(f"Auth failed: {e}", "error")
