@@ -49,8 +49,8 @@ TUI_KEYBINDINGS: dict[str, dict[str, Any]] = {
     "app.thinking.cycle":  {"defaultKeys": "shift+tab",    "description": "Cycle thinking level"},
     "app.thinking.toggle": {"defaultKeys": "ctrl+t",       "description": "Toggle thinking blocks"},
     # Select / autocomplete list
-    "tui.select.up":        {"defaultKeys": "up",              "description": "Move selection up"},
-    "tui.select.down":      {"defaultKeys": "down",            "description": "Move selection down"},
+    "tui.select.up":        {"defaultKeys": ["up", "ctrl+p"],    "description": "Move selection up"},
+    "tui.select.down":      {"defaultKeys": ["down", "ctrl+n"],  "description": "Move selection down"},
     "tui.select.pageUp":    {"defaultKeys": "pageUp",          "description": "Selection page up"},
     "tui.select.pageDown":  {"defaultKeys": "pageDown",        "description": "Selection page down"},
     "tui.select.confirm":   {"defaultKeys": "enter",           "description": "Confirm selection"},
