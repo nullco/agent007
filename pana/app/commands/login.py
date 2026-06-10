@@ -4,6 +4,7 @@ from __future__ import annotations
 from pana.ai.providers.factory import get_provider, get_providers
 from pana.app.commands.base import Command
 from pana.app.context import UIContext
+from pana.state import state
 
 
 class LoginCommand(Command):
@@ -26,11 +27,36 @@ class LoginCommand(Command):
 
         try:
             provider = get_provider(chosen)
-            await provider.authenticate(handler, ctx)
+            flow = provider.get_auth_flow()
+
+            credentials: dict[str, str] | None = None
+            if flow.fields:
+                credentials = {}
+                for field in flow.fields:
+                    value = await ctx.input(
+                        f"{chosen}: {field.label}",
+                        placeholder=field.placeholder,
+                    )
+                    if value is None:
+                        ctx.notify("Authentication cancelled.", "muted")
+                        return
+                    value = value.strip()
+                    if not value:
+                        ctx.notify(
+                            f"{field.label} is required for {chosen}.", "error"
+                        )
+                        return
+                    credentials[field.key] = value
+
+            await provider.authenticate(handler, credentials)
+
             current = ctx.agent.provider_name if ctx.agent else None
             if current != chosen:
+                state.set("provider", chosen)
+                state.set("model", None)
+                ctx.update_footer()
                 ctx.notify(
-                    f"Logged in to {chosen}. Use /model to select a {chosen} model.",
+                    f"Logged in to {chosen}. Use /model to select a model.",
                     "success",
                 )
         except Exception as e:

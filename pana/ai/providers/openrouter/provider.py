@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from pana.ai.providers.auth import CredentialStore
 from pana.ai.providers.model import Model, ModelInfo
 from pana.ai.providers.openai_completions import OpenAICompletionsClient
-from pana.ai.providers.provider import Provider
+from pana.ai.providers.provider import AuthFlow, AuthPrompt, Provider
 
 
 def _openrouter_thinking(kwargs: dict, level: str) -> None:
@@ -112,18 +112,27 @@ class OpenRouterProvider(Provider):
     def __init__(self):
         self._credentials = CredentialStore("openrouter")
 
-    async def authenticate(self, handler, ctx=None):
-        if ctx is None:
-            await handler("OpenRouter requires a UI context for API key input.")
+    def get_auth_flow(self) -> AuthFlow:
+        return AuthFlow(
+            fields=[
+                AuthPrompt(
+                    key="api_key",
+                    label="OpenRouter API key",
+                    placeholder="sk-or-...",
+                )
+            ]
+        )
+
+    async def authenticate(self, handler, credentials: dict[str, str] | None = None):
+        if not credentials:
+            await handler("OpenRouter API key is required.")
             return
 
-        await handler("Please enter your OpenRouter API key.")
-        api_key = await ctx.input("OpenRouter API key")
+        api_key = credentials.get("api_key", "").strip()
         if not api_key:
             await handler("API key is required for OpenRouter.")
             return
 
-        api_key = api_key.strip()
         self._credentials.set("api_key", api_key)
         self._credentials.save()
         await handler("OpenRouter API key saved successfully.")

@@ -6,6 +6,7 @@ from pana.ai.providers.openrouter.provider import (
     OpenRouterProvider,
     _openrouter_thinking,
 )
+from pana.ai.providers.provider import AuthFlow
 
 
 @pytest.fixture
@@ -24,21 +25,23 @@ class TestOpenRouterProvider:
     def test_should_not_reauthenticate(self, provider):
         assert not provider.should_reauthenticate()
 
-    async def test_authenticate_with_ctx(self, provider):
+    def test_get_auth_flow(self, provider):
+        flow = provider.get_auth_flow()
+        assert isinstance(flow, AuthFlow)
+        assert len(flow.fields) == 1
+        assert flow.fields[0].key == "api_key"
+
+    async def test_authenticate_with_key(self, provider):
         calls = []
 
         async def handler(msg):
             calls.append(("handler", msg))
 
-        class FakeCtx:
-            async def input(self, title, placeholder="", *, timeout=None):
-                return "test-api-key"
-
-        await provider.authenticate(handler, FakeCtx())
+        await provider.authenticate(handler, {"api_key": "test-api-key"})
         assert provider.is_authenticated()
         assert provider._credentials.get("api_key") == "test-api-key"
 
-    async def test_authenticate_without_ctx(self, provider):
+    async def test_authenticate_without_credentials(self, provider):
         calls = []
 
         async def handler(msg):
@@ -46,19 +49,15 @@ class TestOpenRouterProvider:
 
         await provider.authenticate(handler, None)
         assert not provider.is_authenticated()
-        assert ("handler", "OpenRouter requires a UI context for API key input.") in calls
+        assert ("handler", "OpenRouter API key is required.") in calls
 
-    async def test_authenticate_cancels_when_no_key(self, provider):
+    async def test_authenticate_empty_key(self, provider):
         calls = []
 
         async def handler(msg):
             calls.append(("handler", msg))
 
-        class FakeCtx:
-            async def input(self, title, placeholder="", *, timeout=None):
-                return None
-
-        await provider.authenticate(handler, FakeCtx())
+        await provider.authenticate(handler, {"api_key": ""})
         assert not provider.is_authenticated()
         assert ("handler", "API key is required for OpenRouter.") in calls
 

@@ -6,7 +6,7 @@ from openai import AsyncOpenAI
 from pana.ai.providers.auth import CredentialStore
 from pana.ai.providers.copilot.client import CopilotClient
 from pana.ai.providers.model import Model, ModelInfo
-from pana.ai.providers.provider import Provider
+from pana.ai.providers.provider import AuthFlow, Provider
 
 from .auth import (
     COPILOT_HEADERS,
@@ -89,7 +89,10 @@ class CopilotProvider(Provider):
     def __init__(self):
         self._credentials = CredentialStore("github-copilot")
 
-    async def authenticate(self, handler, ctx=None):
+    def get_auth_flow(self) -> AuthFlow:
+        return AuthFlow()  # device flow — no UI credential prompts needed
+
+    async def authenticate(self, handler, credentials: dict[str, str] | None = None):
         response = await asyncio.to_thread(start_device_flow)
         await handler(f"""[OAuth] Please visit {response.verification_uri}
 Code: {response.user_code}""")
