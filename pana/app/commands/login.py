@@ -33,10 +33,7 @@ class LoginCommand(Command):
             if flow.fields:
                 credentials = {}
                 for field in flow.fields:
-                    value = await ctx.input(
-                        f"{chosen}: {field.label}",
-                        placeholder=field.placeholder,
-                    )
+                    value = await ctx.input(f"{chosen}: {field.label}")
                     if value is None:
                         ctx.notify("Authentication cancelled.", "muted")
                         return

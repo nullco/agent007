@@ -106,7 +106,6 @@ class OpenCodeGoProvider(Provider):
                 AuthPrompt(
                     key="api_key",
                     label="OpenCode Go API key",
-                    placeholder="sk-...",
                 )
             ]
         )

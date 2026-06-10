@@ -10,7 +10,6 @@ class AuthPrompt:
 
     key: str
     label: str
-    placeholder: str = ""
     sensitive: bool = True
 
 

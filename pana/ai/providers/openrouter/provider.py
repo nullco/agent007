@@ -118,7 +118,6 @@ class OpenRouterProvider(Provider):
                 AuthPrompt(
                     key="api_key",
                     label="OpenRouter API key",
-                    placeholder="sk-or-...",
                 )
             ]
         )
