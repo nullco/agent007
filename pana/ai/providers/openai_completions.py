@@ -8,7 +8,7 @@ configured ``AsyncOpenAI`` instance.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from openai import AsyncOpenAI
 
@@ -199,10 +199,10 @@ class OpenAICompletionsClient:
         self,
         openai_client: AsyncOpenAI,
         *,
-        thinking_mode: str = "reasoning_effort",
+        apply_thinking: Callable[[dict, str], None] | None = None,
     ) -> None:
         self._client = openai_client
-        self._thinking_mode = thinking_mode
+        self._apply_thinking_fn = apply_thinking or _default_thinking
 
     async def stream(
         self,
@@ -237,11 +237,8 @@ class OpenAICompletionsClient:
     ) -> None:
         if not settings or not settings.thinking:
             return
+        self._apply_thinking_fn(kwargs, settings.thinking)
 
-        if self._thinking_mode == "reasoning_effort":
-            kwargs["reasoning_effort"] = settings.thinking
-        elif self._thinking_mode == "deepseek":
-            kwargs["reasoning_effort"] = settings.thinking
-        elif self._thinking_mode == "qwen":
-            extra = kwargs.setdefault("extra_body", {})
-            extra["enable_thinking"] = True
+
+def _default_thinking(kwargs: dict, level: str) -> None:
+    kwargs["reasoning_effort"] = level

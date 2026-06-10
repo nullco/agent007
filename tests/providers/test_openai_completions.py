@@ -257,10 +257,21 @@ async def test_stream_close():
     assert resp.closed
 
 
-def test_apply_thinking_reasoning_effort():
-    client = OpenAICompletionsClient(
-        AsyncOpenAI(api_key="dummy"), thinking_mode="reasoning_effort"
-    )
+def _deepseek_thinking(kwargs, level):
+    kwargs["reasoning_effort"] = level
+
+
+def _qwen_thinking(kwargs, level):
+    extra = kwargs.setdefault("extra_body", {})
+    extra["enable_thinking"] = True
+
+
+def _openrouter_thinking(kwargs, level):
+    kwargs["reasoning"] = {"effort": level}
+
+
+def test_apply_thinking_default():
+    client = OpenAICompletionsClient(AsyncOpenAI(api_key="dummy"))
     kwargs = {}
     client._apply_thinking(kwargs, ModelSettings(thinking="medium"))
     assert kwargs["reasoning_effort"] == "medium"
@@ -268,7 +279,7 @@ def test_apply_thinking_reasoning_effort():
 
 def test_apply_thinking_deepseek():
     client = OpenAICompletionsClient(
-        AsyncOpenAI(api_key="dummy"), thinking_mode="deepseek"
+        AsyncOpenAI(api_key="dummy"), apply_thinking=_deepseek_thinking
     )
     kwargs = {}
     client._apply_thinking(kwargs, ModelSettings(thinking="high"))
@@ -277,7 +288,7 @@ def test_apply_thinking_deepseek():
 
 def test_apply_thinking_qwen():
     client = OpenAICompletionsClient(
-        AsyncOpenAI(api_key="dummy"), thinking_mode="qwen"
+        AsyncOpenAI(api_key="dummy"), apply_thinking=_qwen_thinking
     )
     kwargs = {}
     client._apply_thinking(kwargs, ModelSettings(thinking="low"))
@@ -285,9 +296,18 @@ def test_apply_thinking_qwen():
     assert "reasoning_effort" not in kwargs
 
 
+def test_apply_thinking_openrouter():
+    client = OpenAICompletionsClient(
+        AsyncOpenAI(api_key="dummy"), apply_thinking=_openrouter_thinking
+    )
+    kwargs = {}
+    client._apply_thinking(kwargs, ModelSettings(thinking="medium"))
+    assert kwargs["reasoning"] == {"effort": "medium"}
+
+
 def test_apply_thinking_off():
     client = OpenAICompletionsClient(
-        AsyncOpenAI(api_key="dummy"), thinking_mode="deepseek"
+        AsyncOpenAI(api_key="dummy"), apply_thinking=_deepseek_thinking
     )
     kwargs = {}
     client._apply_thinking(kwargs, ModelSettings(thinking=None))

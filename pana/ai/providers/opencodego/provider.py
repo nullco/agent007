@@ -7,6 +7,21 @@ from pana.ai.providers.model import Model, ModelInfo
 from pana.ai.providers.openai_completions import OpenAICompletionsClient
 from pana.ai.providers.provider import Provider
 
+
+def _deepseek_thinking(kwargs: dict, level: str) -> None:
+    kwargs["reasoning_effort"] = level
+
+
+def _qwen_thinking(kwargs: dict, level: str) -> None:
+    extra = kwargs.setdefault("extra_body", {})
+    extra["enable_thinking"] = True
+
+
+_THINKING_STRATEGIES = {
+    "deepseek": _deepseek_thinking,
+    "qwen": _qwen_thinking,
+}
+
 BASE_URL = "https://opencode.ai/zen/go/v1"
 
 _OPENAI_THINKING = ["low", "medium", "high"]
@@ -125,10 +140,8 @@ class OpenCodeGoProvider(Provider):
             default_headers=default_headers,
         )
         info = MODEL_REGISTRY.get(model_name)
-        client = OpenAICompletionsClient(
-            openai_client,
-            thinking_mode=info.thinking_mode if info else "reasoning_effort",
-        )
+        strategy = _THINKING_STRATEGIES.get(info.thinking_mode) if info else None
+        client = OpenAICompletionsClient(openai_client, apply_thinking=strategy)
         return Model(model_name, client, self, info=info)
 
     def get_models(self) -> dict[str, ModelInfo]:

@@ -2,10 +2,12 @@ from pana.ai.providers.provider import Provider
 
 from .copilot.provider import CopilotProvider
 from .opencodego.provider import OpenCodeGoProvider
+from .openrouter.provider import OpenRouterProvider
 
 _provider_classes = {
     "copilot": CopilotProvider,
     "opencodego": OpenCodeGoProvider,
+    "openrouter": OpenRouterProvider,
 }
 
 

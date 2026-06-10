@@ -105,6 +105,9 @@ class TestOpenCodeGoProvider:
         provider._credentials.set("api_key", "test-key")
         provider._credentials.save()
 
+        from pana.ai.providers.opencodego.provider import _qwen_thinking
+
         model = await provider.build_model("qwen3.6-plus")
         assert model.info is not None
         assert model.info.thinking_mode == "qwen"
+        assert model.client._apply_thinking_fn is _qwen_thinking
