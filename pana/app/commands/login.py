@@ -4,7 +4,6 @@ from __future__ import annotations
 from pana.ai.providers.factory import get_provider, get_providers
 from pana.app.commands.base import Command
 from pana.app.context import UIContext
-from pana.state import state
 
 
 class LoginCommand(Command):

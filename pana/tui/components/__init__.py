@@ -18,6 +18,8 @@ from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.truncated_text import TruncatedText
 from pana.tui.components.user_message import UserMessage
+from pana.tui.components.vi_editor import ViModeEditor
+from pana.tui.components.vi_input import ViModeInput
 
 __all__ = [
     "Box",
@@ -25,6 +27,7 @@ __all__ = [
     "Editor",
     "EditorOptions",
     "EditorTheme",
+    "ViModeEditor",
     "Image",
     "ImageOptions",
     "ImageTheme",
@@ -45,4 +48,5 @@ __all__ = [
     "Text",
     "TruncatedText",
     "UserMessage",
+    "ViModeInput",
 ]

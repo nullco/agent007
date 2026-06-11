@@ -34,6 +34,7 @@ from pana.tui.components.footer import Footer
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.user_message import UserMessage
+from pana.tui.components.vi_editor import ViModeEditor
 from pana.tui.escape_codes import EscapeCodes
 from pana.tui.terminal import ProcessTerminal
 from pana.tui.theme import PanaTheme, discover_themes
@@ -357,11 +358,12 @@ class PanaApp:
             commands=slash_commands, fd_path=fd_path,
         )
 
-        self._editor = Editor(
+        _raw_editor = Editor(
             self.tui, editor_theme,
             EditorOptions(padding_x=0, autocomplete_max_visible=5),
         )
-        self._editor.set_autocomplete_provider(autocomplete)
+        _raw_editor.set_autocomplete_provider(autocomplete)
+        self._editor = ViModeEditor(_raw_editor)
         self._editor.on_submit = self._on_submit
         self._editor.on_action = self._on_action
 
